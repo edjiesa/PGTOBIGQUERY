@@ -161,7 +161,8 @@ class PostgresExtractor:
         self.connect()
         target_schema = schema or self.config.pg_schema
 
-        query = """
+        safe_schema = target_schema.replace("'", "''")
+        query = f"""
             SELECT 
                 c.relname AS table_name,
                 GREATEST(c.reltuples::bigint, 0) AS row_count,
@@ -169,15 +170,16 @@ class PostgresExtractor:
             FROM pg_class c
             JOIN pg_namespace n ON n.oid = c.relnamespace
             LEFT JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
-            WHERE n.nspname = %s
+            WHERE n.nspname = '{safe_schema}'
               AND c.relkind = 'r'
             GROUP BY c.relname, c.reltuples
             ORDER BY c.relname;
         """
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
             try:
-                cur.execute(query, (target_schema,))
+                cur.execute(query)
                 rows = cur.fetchall()
+
                 result = []
                 for r in rows:
                     result.append({
