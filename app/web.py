@@ -14,8 +14,9 @@ from pydantic import BaseModel
 from app.config import config, MigrationConfig
 from app.extractor import PostgresExtractor
 from app.loader import BigQueryLoader
-from app.migrator import DatabaseMigrator
+from app.migrator import DatabaseMigrator, active_migration_status
 from app.state import state_manager
+
 
 logger = logging.getLogger("pgtobigquery.web")
 
@@ -346,7 +347,19 @@ async def start_migration(req: MigrationRequestModel, background_tasks: Backgrou
 
 
 
+@web_app.get("/api/migration-progress")
+def get_migration_progress():
+    """Returns real-time migration progress metrics for HTTP polling fallbacks."""
+    cached_stats = state_manager.load_stats()
+    return {
+        "status": "running" if active_migration_status.get("is_running") else "idle",
+        "progress": active_migration_status,
+        "saved_stats": cached_stats
+    }
+
+
 @web_app.websocket("/ws/logs")
+
 async def websocket_logs(websocket: WebSocket):
     """WebSocket endpoint for real-time progress & log updates."""
     await websocket.accept()

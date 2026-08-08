@@ -1367,13 +1367,45 @@
       }
     }
 
+    async function pollMigrationProgress() {
+      try {
+        const res = await safeFetchJson('/api/migration-progress');
+        if (res.ok && res.data && res.data.progress) {
+          const prog = res.data.progress;
+          const statusText = document.getElementById('progressText');
+
+          if (prog.is_running) {
+            const currentTName = prog.current_table_name || '-';
+            const totalT = currentMigrationStats.totalTables || prog.total_tables || 1381;
+
+            document.getElementById('statTablesProcessed').innerText = `${prog.tables_processed} / ${totalT}`;
+            document.getElementById('statRowsMigrated').innerText = `${(prog.total_rows_migrated || 0).toLocaleString()} baris`;
+            document.getElementById('statCurrentTable').innerText = currentTName;
+            document.getElementById('statCurrentTableRows').innerText = `${(prog.current_table_loaded_rows || 0).toLocaleString()} / ${(prog.current_table_rows || 0).toLocaleString()}`;
+
+            if (statusText) {
+              statusText.innerText = `⏳ Syncing '${currentTName}' (${(prog.current_table_loaded_rows || 0).toLocaleString()} / ${(prog.current_table_rows || 0).toLocaleString()} rows)...`;
+            }
+
+            const pct = Math.round((prog.tables_processed / totalT) * 100);
+            document.getElementById('progressBar').style.width = `${pct}%`;
+          }
+        }
+      } catch (err) {
+        console.warn('Polling migration progress error:', err);
+      }
+    }
+
     window.onload = async () => {
       initWS();
       await renderProfilesDropdown();
       restorePersistentState();
+      pollMigrationProgress();
+      setInterval(pollMigrationProgress, 2000);
     };
   </script>
 </body>
+
 </html>
 
 

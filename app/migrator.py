@@ -11,6 +11,21 @@ from app.type_mapper import postgres_to_bigquery_type
 logger = logging.getLogger("pgtobigquery.migrator")
 
 
+active_migration_status: Dict[str, Any] = {
+    "is_running": False,
+    "total_tables": 0,
+    "tables_processed": 0,
+    "total_rows_migrated": 0,
+    "current_table_name": "-",
+    "current_table_index": 0,
+    "current_table_rows": 0,
+    "current_table_loaded_rows": 0,
+    "last_completed_table": None,
+    "last_completed_rows": 0,
+    "logs": []
+}
+
+
 class DatabaseMigrator:
     def __init__(self, config: MigrationConfig):
         self.config = config
@@ -27,6 +42,7 @@ class DatabaseMigrator:
         """
         Executes database migration from PostgreSQL 10.4 to Google BigQuery.
         """
+        global active_migration_status
         start_time = time.time()
         results = {
             "status": "completed",
@@ -55,11 +71,17 @@ class DatabaseMigrator:
             if exclude_tables:
                 target_tables = [t for t in target_tables if t not in exclude_tables]
 
+            active_migration_status["is_running"] = True
+            active_migration_status["total_tables"] = len(target_tables)
+            active_migration_status["tables_processed"] = 0
+            active_migration_status["total_rows_migrated"] = 0
+
             notify_progress("start", {
                 "total_tables": len(target_tables),
                 "tables": target_tables,
                 "dry_run": dry_run
             })
+
 
             # 3. Process each table
             for table_idx, table_name in enumerate(target_tables, start=1):
@@ -82,6 +104,11 @@ class DatabaseMigrator:
                             for c in pg_cols
                         ]
                     }
+
+                    active_migration_status["current_table_name"] = table_name
+                    active_migration_status["current_table_index"] = table_idx
+                    active_migration_status["current_table_rows"] = row_count
+                    active_migration_status["current_table_loaded_rows"] = 0
 
                     notify_progress("table_start", {
                         "table_index": table_idx,
@@ -122,6 +149,7 @@ class DatabaseMigrator:
                                 write_disposition=write_disp
                             )
                             rows_loaded += len(batch)
+                            active_migration_status["current_table_loaded_rows"] = rows_loaded
                         finally:
                             if os.path.exists(tmp_path):
                                 os.remove(tmp_path)
@@ -150,6 +178,11 @@ class DatabaseMigrator:
                     results["total_rows_migrated"] += final_bq_rows
                     results["table_details"].append(table_info)
 
+                    active_migration_status["tables_processed"] += 1
+                    active_migration_status["total_rows_migrated"] += final_bq_rows
+                    active_migration_status["last_completed_table"] = table_name
+                    active_migration_status["last_completed_rows"] = final_bq_rows
+
                     notify_progress("table_success", table_info)
 
 
@@ -164,9 +197,11 @@ class DatabaseMigrator:
                     results["table_details"].append(table_err_info)
                     notify_progress("table_error", table_err_info)
 
+            # 4. Finish migration run
             results["total_duration_seconds"] = round(time.time() - start_time, 2)
+            active_migration_status["is_running"] = False
             notify_progress("finish", results)
             return results
-
         finally:
+            active_migration_status["is_running"] = False
             self.extractor.close()
