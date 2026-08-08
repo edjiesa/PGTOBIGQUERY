@@ -134,14 +134,24 @@ class DatabaseMigrator:
                             "total_expected": row_count
                         })
 
-                    table_info["bigquery_rows"] = rows_loaded
+                    # If table has 0 rows or yielded no batches, create empty table schema in BigQuery
+                    if batch_num == 0:
+                        self.loader.create_empty_table_if_not_exists(table_name, bq_schema)
+
+                    # Verify actual rows present in BigQuery
+                    bq_verified_rows = self.loader.get_table_row_count(table_name)
+                    final_bq_rows = bq_verified_rows if bq_verified_rows > 0 else rows_loaded
+
+                    table_info["bigquery_rows"] = final_bq_rows
                     table_info["status"] = "success"
                     table_info["duration_seconds"] = round(time.time() - table_start_time, 2)
+                    table_info["bq_table_ref"] = f"{self.loader.client.project}.{self.config.bigquery_dataset_id}.{table_name}"
                     results["tables_processed"] += 1
-                    results["total_rows_migrated"] += rows_loaded
+                    results["total_rows_migrated"] += final_bq_rows
                     results["table_details"].append(table_info)
 
                     notify_progress("table_success", table_info)
+
 
                 except Exception as table_err:
                     logger.error(f"Error migrating table '{table_name}': {table_err}", exc_info=True)

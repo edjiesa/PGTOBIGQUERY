@@ -237,3 +237,35 @@ class BigQueryLoader:
         job.result()  # Wait for job completion
         logger.info(f"BigQuery Load Job completed for table '{table_id}'. Output rows: {job.output_rows}")
         return job.output_rows or 0
+
+    def create_empty_table_if_not_exists(
+        self,
+        table_id: str,
+        bq_schema: List[bigquery.SchemaField]
+    ) -> bigquery.Table:
+        """Creates an empty table with specified schema in BigQuery if it does not exist."""
+        dataset_id = self.config.bigquery_dataset_id
+        table_ref = f"{self.client.project}.{dataset_id}.{table_id}"
+
+        try:
+            table = self.client.get_table(table_ref)
+            logger.info(f"BigQuery table '{table_id}' already exists.")
+            return table
+        except Exception:
+            logger.info(f"Creating empty BigQuery table '{table_id}' with schema...")
+            table = bigquery.Table(table_ref, schema=bq_schema)
+            table = self.client.create_table(table, exists_ok=True)
+            logger.info(f"Successfully created empty BigQuery table '{table_id}'.")
+            return table
+
+    def get_table_row_count(self, table_id: str) -> int:
+        """Gets actual row count of a table directly from BigQuery metadata/query."""
+        dataset_id = self.config.bigquery_dataset_id
+        table_ref = f"{self.client.project}.{dataset_id}.{table_id}"
+        try:
+            table = self.client.get_table(table_ref)
+            return table.num_rows or 0
+        except Exception as e:
+            logger.warning(f"Could not fetch BigQuery row count for '{table_id}': {e}")
+            return 0
+

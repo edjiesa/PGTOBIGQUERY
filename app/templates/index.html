@@ -592,6 +592,8 @@
       }
     }
 
+    let activeBatchTrackers = {};
+
     function handleWSMessage(msg) {
       const evt = msg.event;
       const data = msg.data;
@@ -625,31 +627,119 @@
       } else if (evt === 'batch_complete') {
         document.getElementById('statCurrentTableRows').innerText = `${(data.total_rows_loaded || 0).toLocaleString()} / ${(data.total_expected || 0).toLocaleString()}`;
         appendLog(`📦 Streamed batch #${data.batch_num} for '${data.table_name}': ${(data.rows_batch || 0).toLocaleString()} rows -> Parquet written & uploaded to BigQuery`, 'info');
-      } else if (evt === 'table_success') {
-        currentMigrationStats.tablesProcessed += 1;
-        currentMigrationStats.totalRowsMigrated += (data.bigquery_rows || 0);
+      } else if (evt === 'table_success' || evt === 'table_error') {
+        if (evt === 'table_success') {
+          currentMigrationStats.tablesProcessed += 1;
+          currentMigrationStats.totalRowsMigrated += (data.bigquery_rows || 0);
 
-        const totalT = currentMigrationStats.totalTables || 1;
-        document.getElementById('statTablesProcessed').innerText = `${currentMigrationStats.tablesProcessed} / ${totalT}`;
-        document.getElementById('statRowsMigrated').innerText = `${currentMigrationStats.totalRowsMigrated.toLocaleString()} baris`;
-        document.getElementById('statCurrentTableRows').innerText = `${(data.bigquery_rows || 0).toLocaleString()} / ${(data.postgres_rows || 0).toLocaleString()}`;
+          const totalT = currentMigrationStats.totalTables || 1;
+          document.getElementById('statTablesProcessed').innerText = `${currentMigrationStats.tablesProcessed} / ${totalT}`;
+          document.getElementById('statRowsMigrated').innerText = `${currentMigrationStats.totalRowsMigrated.toLocaleString()} baris`;
+          document.getElementById('statCurrentTableRows').innerText = `${(data.bigquery_rows || 0).toLocaleString()} / ${(data.postgres_rows || 0).toLocaleString()}`;
 
-        const pct = Math.round((currentMigrationStats.tablesProcessed / totalT) * 100);
-        document.getElementById('progressBar').style.width = `${pct}%`;
+          const pct = Math.round((currentMigrationStats.tablesProcessed / totalT) * 100);
+          document.getElementById('progressBar').style.width = `${pct}%`;
 
-        appendLog(`✓ [SUCCESS] Table '${data.table_name}' -> ${(data.bigquery_rows || 0).toLocaleString()} BARIS SUKSES TERMUAT & DIVERIFIKASI DI BIGQUERY (${data.duration_seconds}s)`, 'success');
-        updateSingleTableRowStatus(data.table_name, 'SUCCESS', `✓ ${(data.bigquery_rows || 0).toLocaleString()} baris dimigrasi (${data.duration_seconds}s)`);
-      } else if (evt === 'table_error') {
-        appendLog(`✗ [ERROR] Table '${data.table_name}' gagal: ${data.error}`, 'error');
-        updateSingleTableRowStatus(data.table_name, 'FAILED', `✗ Gagal: ${data.error}`);
+          appendLog(`✓ [SUCCESS] Table '${data.table_name}' -> ${(data.bigquery_rows || 0).toLocaleString()} BARIS SUKSES TERMUAT & DIVERIFIKASI DI BIGQUERY (${data.duration_seconds}s)`, 'success');
+          updateSingleTableRowStatus(data.table_name, 'SUCCESS', `✓ ${(data.bigquery_rows || 0).toLocaleString()} baris dimigrasi (${data.duration_seconds}s)`);
+        } else {
+          appendLog(`✗ [ERROR] Table '${data.table_name}' gagal: ${data.error}`, 'error');
+          updateSingleTableRowStatus(data.table_name, 'FAILED', `✗ Gagal: ${data.error}`);
+        }
+
+        // Update active batch progress bars live
+        Object.keys(activeBatchTrackers).forEach(bIdx => {
+          const tracker = activeBatchTrackers[bIdx];
+          if (tracker && tracker.tables.includes(data.table_name)) {
+            tracker.completedCount += 1;
+            const bPct = Math.round((tracker.completedCount / tracker.totalCount) * 100);
+            const bBar = document.getElementById(`batchProgressBar_${bIdx}`);
+            if (bBar) bBar.style.width = `${bPct}%`;
+          }
+        });
       } else if (evt === 'finish') {
         appendLog(`🎉 [MIGRATION COMPLETED] Total ${data.tables_processed} tabel & ${(data.total_rows_migrated || 0).toLocaleString()} BARIS SUKSES DIMIGRASIKAN KE BIGQUERY dalam ${data.total_duration_seconds}s!`, 'success');
         document.getElementById('progressBar').style.width = '100%';
         document.getElementById('progressText').innerText = `Migrasi Selesai (Total ${(data.total_rows_migrated || 0).toLocaleString()} baris in BigQuery)`;
         document.getElementById('statTablesProcessed').innerText = `${data.tables_processed} / ${data.tables_processed}`;
         document.getElementById('statRowsMigrated').innerText = `${(data.total_rows_migrated || 0).toLocaleString()} baris`;
+
+        // Resolve active batch promises
+        Object.keys(activeBatchTrackers).forEach(bIdx => {
+          const tracker = activeBatchTrackers[bIdx];
+          if (tracker && tracker.resolve) {
+            tracker.resolve(data);
+          }
+        });
+        activeBatchTrackers = {};
       }
     }
+
+    async function syncSpecificBatch(batchIdx) {
+      await saveConfig();
+      const batch = loadedBatchesData.find(b => b.batch_index === batchIdx);
+      if (!batch) return Promise.resolve(false);
+
+      const badge = document.getElementById(`batchBadge_${batchIdx}`);
+      const btn = document.getElementById(`btnSyncBatch_${batchIdx}`);
+      const bar = document.getElementById(`batchProgressBar_${batchIdx}`);
+
+      if (badge) {
+        badge.innerText = 'RUNNING';
+        badge.style.color = '#f59e0b';
+        badge.style.borderColor = 'rgba(245, 158, 11, 0.4)';
+        badge.style.background = 'rgba(245, 158, 11, 0.15)';
+      }
+      if (btn) btn.disabled = true;
+      if (bar) bar.style.width = '0%';
+
+      appendLog(`🚀 Memulai migrasi ${batch.batch_name} (${batch.table_count} tabel, total ${batch.total_rows.toLocaleString()} baris)...`, 'info');
+
+      return new Promise(async (resolve, reject) => {
+        activeBatchTrackers[batchIdx] = {
+          tables: batch.tables,
+          totalCount: batch.table_count,
+          completedCount: 0,
+          resolve: (result) => {
+            if (bar) bar.style.width = '100%';
+            if (badge) {
+              badge.innerText = 'COMPLETED';
+              badge.style.color = '#10b981';
+              badge.style.borderColor = 'rgba(16, 185, 129, 0.4)';
+              badge.style.background = 'rgba(16, 185, 129, 0.15)';
+            }
+            if (btn) btn.disabled = false;
+            resolve(result);
+          }
+        };
+
+        try {
+          const res = await safeFetchJson('/api/migrate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tables: batch.tables, dry_run: false })
+          });
+
+          if (!res.ok) {
+            appendLog(`✗ Error sync ${batch.batch_name}: ${res.data.message}`, 'error');
+            if (badge) {
+              badge.innerText = 'FAILED';
+              badge.style.color = '#ef4444';
+            }
+            if (btn) btn.disabled = false;
+            delete activeBatchTrackers[batchIdx];
+            resolve(false);
+          }
+        } catch (err) {
+          appendLog(`✗ Failed triggering ${batch.batch_name}: ${err}`, 'error');
+          if (badge) badge.innerText = 'FAILED';
+          if (btn) btn.disabled = false;
+          delete activeBatchTrackers[batchIdx];
+          resolve(false);
+        }
+      });
+    }
+
 
 
     function handleFileUpload(event) {
@@ -1121,55 +1211,7 @@
     }
 
 
-    async function syncSpecificBatch(batchIdx) {
-      await saveConfig();
-      const batch = loadedBatchesData.find(b => b.batch_index === batchIdx);
-      if (!batch) return;
 
-      const badge = document.getElementById(`batchBadge_${batchIdx}`);
-      const btn = document.getElementById(`btnSyncBatch_${batchIdx}`);
-      const bar = document.getElementById(`batchProgressBar_${batchIdx}`);
-
-      if (badge) {
-        badge.innerText = 'RUNNING';
-        badge.style.color = '#f59e0b';
-        badge.style.borderColor = 'rgba(245, 158, 11, 0.4)';
-        badge.style.background = 'rgba(245, 158, 11, 0.15)';
-      }
-      if (btn) btn.disabled = true;
-
-      appendLog(`🚀 Memulai migrasi ${batch.batch_name} (${batch.table_count} tabel, total ${batch.total_rows.toLocaleString()} baris)...`, 'info');
-
-      try {
-        const res = await safeFetchJson('/api/migrate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ tables: batch.tables, dry_run: false })
-        });
-
-        if (res.ok) {
-          appendLog(`✓ ${batch.batch_name} dalam proses di background server.`, 'info');
-          if (bar) bar.style.width = '100%';
-          if (badge) {
-            badge.innerText = 'COMPLETED';
-            badge.style.color = '#10b981';
-            badge.style.borderColor = 'rgba(16, 185, 129, 0.4)';
-            badge.style.background = 'rgba(16, 185, 129, 0.15)';
-          }
-        } else {
-          appendLog(`✗ Error sync ${batch.batch_name}: ${res.data.message}`, 'error');
-          if (badge) {
-            badge.innerText = 'FAILED';
-            badge.style.color = '#ef4444';
-          }
-        }
-      } catch (err) {
-        appendLog(`✗ Failed triggering ${batch.batch_name}: ${err}`, 'error');
-        if (badge) badge.innerText = 'FAILED';
-      } finally {
-        if (btn) btn.disabled = false;
-      }
-    }
 
     async function startAllBatchesSequentially() {
       if (loadedBatchesData.length === 0) {
