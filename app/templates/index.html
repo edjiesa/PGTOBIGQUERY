@@ -690,6 +690,21 @@
       }
     }
 
+    async function pollJobUntilDone(jobId, intervalMs = 2000, maxAttempts = 300) {
+      for (let i = 0; i < maxAttempts; i++) {
+        await new Promise(r => setTimeout(r, intervalMs));
+        const res = await safeFetchJson(`/api/job-status/${jobId}`);
+        if (res.ok) {
+          if (res.data.status === 'completed') {
+            return res.data.result;
+          } else if (res.data.status === 'failed') {
+            throw new Error(res.data.error || 'Job failed');
+          }
+        }
+      }
+      throw new Error('Timeout polling background job');
+    }
+
     async function testPostgresAirbyte() {
       await saveConfig();
       const card = document.getElementById('pgAirbyteCard');
@@ -700,8 +715,18 @@
       badge.style.color = '#f59e0b';
       badge.style.borderColor = 'rgba(245, 158, 11, 0.4)';
 
-      const res = await safeFetchJson('/api/test-postgres', { method: 'POST' });
-      const data = res.data;
+      appendLog('⏳ Menguji koneksi Remote PostgreSQL di background (0.001s response)...', 'info');
+      const startRes = await safeFetchJson('/api/test-postgres', { method: 'POST' });
+      let data;
+      if (startRes.ok && startRes.data.status === 'started') {
+        try {
+          data = await pollJobUntilDone(startRes.data.job_id);
+        } catch (err) {
+          data = { status: 'failed', message: String(err) };
+        }
+      } else {
+        data = startRes.data.result || startRes.data;
+      }
 
       checklistEl.innerHTML = '';
       if (data.checklist) {
@@ -720,7 +745,7 @@
         });
       }
 
-      if (res.ok && data.status === 'success') {
+      if (data.status === 'success') {
         badge.innerText = 'CONNECTED';
         badge.style.color = '#10b981';
         badge.style.borderColor = 'rgba(16, 185, 129, 0.4)';
@@ -778,13 +803,20 @@
 
     async function loadTables() {
       await saveConfig();
-      appendLog('Mengambil daftar tabel dari Remote PostgreSQL...', 'info');
-      const res = await safeFetchJson('/api/tables', {}, 300000);
-      const data = res.data;
+      appendLog('⏳ Mengambil daftar 1.381+ tabel dari Remote PostgreSQL di background...', 'info');
+      const startRes = await safeFetchJson('/api/tables');
+      let data;
+      if (startRes.ok && startRes.data.status === 'started') {
+        try {
+          data = await pollJobUntilDone(startRes.data.job_id);
+        } catch (err) {
+          data = { status: 'error', message: String(err) };
+        }
+      } else {
+        data = startRes.data;
+      }
 
-
-
-      if (res.ok && data.status === 'success') {
+      if (data.status === 'success' && data.tables) {
         const container = document.getElementById('tableContainer');
         container.innerHTML = '';
         data.tables.forEach(t => {
@@ -798,11 +830,12 @@
             </div>
           `;
         });
-        appendLog(`Berhasil memuat ${data.tables.length} tabel dari remote database.`, 'success');
+        appendLog(`✓ Berhasil memuat ${data.tables.length} tabel dari remote database.`, 'success');
       } else {
-        appendLog(`Gagal memuat tabel: ${data.message || 'Connection Error'}`, 'error');
+        appendLog(`Gagal memuat tabel: ${data.message || 'Error loading tables'}`, 'error');
       }
     }
+
 
     async function startMigration(dryRun = false) {
       await saveConfig();

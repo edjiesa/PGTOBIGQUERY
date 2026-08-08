@@ -119,13 +119,37 @@ async def update_config(data: ConfigUpdateModel):
 
 
 
+async_jobs: Dict[str, Dict[str, Any]] = {}
+
+
+@web_app.get("/api/job-status/{job_id}")
+def get_job_status(job_id: str):
+    """Returns status and result of a background job."""
+    if job_id in async_jobs:
+        return async_jobs[job_id]
+    return {"status": "unknown", "message": f"Job '{job_id}' not found."}
+
+
 @web_app.post("/api/test-postgres")
-def test_postgres():
-    """Airbyte-style diagnostic connection test for PostgreSQL (Runs off-thread)."""
-    extractor = PostgresExtractor(config)
-    res = extractor.test_connection()
-    extractor.close()
-    return res
+def test_postgres(background_tasks: BackgroundTasks):
+    """Airbyte-style diagnostic connection test for PostgreSQL (Runs off-thread in background if needed)."""
+    job_id = "test_postgres"
+    async_jobs[job_id] = {"status": "running", "message": "Testing remote PostgreSQL connection..."}
+
+    def run_bg_test():
+        try:
+            extractor = PostgresExtractor(config)
+            res = extractor.test_connection()
+            extractor.close()
+            async_jobs[job_id] = {"status": "completed", "result": res}
+            # Broadcast over WebSocket
+            asyncio.run(broadcast_ws_message({"type": "test_postgres_done", "data": res}))
+        except Exception as e:
+            async_jobs[job_id] = {"status": "failed", "error": str(e)}
+            asyncio.run(broadcast_ws_message({"type": "test_postgres_error", "message": str(e)}))
+
+    background_tasks.add_task(run_bg_test)
+    return {"status": "started", "job_id": job_id, "message": "Diagnostic test started in background."}
 
 
 @web_app.post("/api/test-bigquery")
@@ -153,15 +177,32 @@ def test_connections():
 
 
 @web_app.get("/api/tables")
-def list_tables():
-    """Fetches PostgreSQL tables and metadata in a single bulk query (Optimized for 1000+ tables)."""
-    try:
-        extractor = PostgresExtractor(config)
-        tables = extractor.get_all_tables_metadata()
-        extractor.close()
-        return {"status": "success", "tables": tables}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
+def list_tables(background_tasks: BackgroundTasks):
+    """Fetches PostgreSQL tables and metadata in background (Optimized for 1000+ slow tables)."""
+    job_id = "load_tables"
+    
+    # If job is already completed recently, return result immediately
+    if job_id in async_jobs and async_jobs[job_id].get("status") == "completed":
+        return async_jobs[job_id]["result"]
+
+    async_jobs[job_id] = {"status": "running", "message": "Fetching catalog from remote PostgreSQL..."}
+
+    def run_bg_tables():
+        try:
+            extractor = PostgresExtractor(config)
+            tables = extractor.get_all_tables_metadata()
+            extractor.close()
+            res = {"status": "success", "tables": tables}
+            async_jobs[job_id] = {"status": "completed", "result": res}
+            asyncio.run(broadcast_ws_message({"type": "tables_loaded", "count": len(tables)}))
+        except Exception as e:
+            res = {"status": "error", "message": str(e)}
+            async_jobs[job_id] = {"status": "failed", "result": res, "error": str(e)}
+            asyncio.run(broadcast_ws_message({"type": "tables_error", "message": str(e)}))
+
+    background_tasks.add_task(run_bg_tables)
+    return {"status": "started", "job_id": job_id, "message": "Loading table catalog in background."}
+
 
 
 
