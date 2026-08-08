@@ -207,7 +207,55 @@ def list_tables(background_tasks: BackgroundTasks):
 
 
 
+@web_app.get("/api/table-batches")
+def get_table_batches(batch_size: int = 100):
+    """
+    Groups all PostgreSQL tables into batches of N tables (default 100 per batch),
+    sorted ascending by row count (from smallest tables with 0 rows to largest).
+    """
+    try:
+        extractor = PostgresExtractor(config)
+        tables = extractor.get_all_tables_metadata()
+        extractor.close()
+
+        # Sort tables by row_count ASCENDING (smallest to largest)
+        tables_sorted = sorted(tables, key=lambda x: x.get("row_count", 0))
+
+        batches = []
+        chunk_size = max(1, batch_size)
+        total_tables = len(tables_sorted)
+
+        for idx, i in enumerate(range(0, total_tables, chunk_size), start=1):
+            chunk = tables_sorted[i:i + chunk_size]
+            min_rows = chunk[0]["row_count"] if chunk else 0
+            max_rows = chunk[-1]["row_count"] if chunk else 0
+            total_rows_chunk = sum(t["row_count"] for t in chunk)
+            batch_tables = [t["table_name"] for t in chunk]
+
+            batches.append({
+                "batch_index": idx,
+                "batch_name": f"Kelompok #{idx} ({len(chunk)} Tabel)",
+                "table_count": len(chunk),
+                "min_rows": min_rows,
+                "max_rows": max_rows,
+                "total_rows": total_rows_chunk,
+                "tables": batch_tables,
+                "table_details": chunk
+            })
+
+        return {
+            "status": "success",
+            "total_tables": total_tables,
+            "total_batches": len(batches),
+            "batch_table_size": chunk_size,
+            "batches": batches
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
 @web_app.post("/api/migrate")
+
 async def start_migration(req: MigrationRequestModel, background_tasks: BackgroundTasks):
     """Starts migration task in background."""
     def run_bg_migration():
