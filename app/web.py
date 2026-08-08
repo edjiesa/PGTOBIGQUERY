@@ -60,13 +60,22 @@ async def broadcast_ws_message(message: Dict[str, Any]):
                 active_websockets.remove(ws)
 
 
+@web_app.get("/health")
+@web_app.get("/api/v1/health")
+async def health_check():
+    """Health check probe endpoint for load balancers and container orchestrators."""
+    return {"status": "healthy", "service": "pgtobigquery"}
+
+
 @web_app.get("/", response_class=HTMLResponse)
 async def get_dashboard(request: Request):
     """Renders main dashboard HTML page."""
     return templates.TemplateResponse(
-        "index.html",
-        {"request": request, "config": config}
+        request=request,
+        name="index.html",
+        context={"config": config}
     )
+
 
 
 @web_app.get("/api/config")
