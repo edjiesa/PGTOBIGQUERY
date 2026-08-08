@@ -349,16 +349,14 @@ async def start_migration(req: MigrationRequestModel, background_tasks: Backgrou
 
 @web_app.post("/api/migrate-single")
 def migrate_single_table(req: MigrationRequestModel):
-
     """Synchronously migrates a single target table and returns detailed status/errors immediately."""
     if not req.tables or len(req.tables) == 0:
-        raise HTTPException(status_code=400, detail="No table specified for single table migration.")
+        return {"status": "failed", "error": "No table specified for single table migration."}
 
     table_name = req.tables[0]
-    config = get_runtime_config()
-    migrator = DatabaseMigrator(config)
 
     try:
+        migrator = DatabaseMigrator(config)
         results = migrator.run_migration(tables=[table_name], dry_run=req.dry_run)
         if results.get("errors") and len(results["errors"]) > 0:
             err_msg = results["errors"][0].get("error", "Unknown migration error")
@@ -366,7 +364,6 @@ def migrate_single_table(req: MigrationRequestModel):
                 "status": "failed",
                 "table_name": table_name,
                 "error": err_msg,
-                "results": results
             }
 
         table_details = results.get("table_details", [])
@@ -375,15 +372,16 @@ def migrate_single_table(req: MigrationRequestModel):
             "status": "success",
             "table_name": table_name,
             "bigquery_rows": bq_rows,
-            "results": results
         }
     except Exception as e:
-        logger.error(f"Single table migration endpoint error for '{table_name}': {e}", exc_info=True)
+        logger.error(f"Single table migration error for '{table_name}': {e}", exc_info=True)
         return {
             "status": "failed",
             "table_name": table_name,
             "error": str(e)
         }
+
+
 
 
 @web_app.get("/api/migration-progress")
