@@ -15,29 +15,41 @@ class PostgresExtractor:
 
     def connect(self):
         """Establishes database connection to PostgreSQL / EnterpriseDB 10.x (Remote or Local)."""
-        if self.conn is None or self.conn.closed:
-            self.conn = psycopg2.connect(
-                host=self.config.pg_host,
-                port=self.config.pg_port,
-                user=self.config.pg_user,
-                password=self.config.pg_password,
-                dbname=self.config.pg_database,
-                sslmode=self.config.pg_sslmode,
-                connect_timeout=5
-            )
-            logger.info(f"Connected to PostgreSQL at {self.config.pg_host}:{self.config.pg_port}/{self.config.pg_database} (sslmode={self.config.pg_sslmode})")
+        if self.conn is not None and not self.conn.closed:
+            try:
+                with self.conn.cursor() as cur:
+                    cur.execute("SELECT 1;")
+                return
+            except Exception:
+                self.close()
+
+        self.conn = psycopg2.connect(
+            host=self.config.pg_host,
+            port=self.config.pg_port,
+            user=self.config.pg_user,
+            password=self.config.pg_password,
+            dbname=self.config.pg_database,
+            sslmode=self.config.pg_sslmode,
+            connect_timeout=5
+        )
+        logger.info(f"Connected to PostgreSQL at {self.config.pg_host}:{self.config.pg_port}/{self.config.pg_database} (sslmode={self.config.pg_sslmode})")
 
     def close(self):
         """Closes PostgreSQL database connection."""
         if self.conn and not self.conn.closed:
-            self.conn.close()
+            try:
+                self.conn.close()
+            except Exception:
+                pass
+            self.conn = None
             logger.info("Closed PostgreSQL database connection.")
 
     def test_connection(self) -> Dict[str, Any]:
         """
         Performs Airbyte-style step-by-step connection diagnostics for PostgreSQL / EnterpriseDB 10.x.
-        Each step is evaluated independently.
+        Each step is evaluated independently with guaranteed cleanup.
         """
+        self.close()
         checklist = [
             {"step": "tcp_handshake", "name": "PostgreSQL Host Reachable", "status": "pending", "detail": ""},
             {"step": "authentication", "name": "User Authentication", "status": "pending", "detail": ""},
@@ -45,74 +57,79 @@ class PostgresExtractor:
             {"step": "catalog_permission", "name": "Schema & Table Inspection", "status": "pending", "detail": ""}
         ]
 
-        # Step 1: TCP Handshake Check (3s Timeout)
         try:
-            sock = socket.create_connection((self.config.pg_host, self.config.pg_port), timeout=3.0)
-            sock.close()
-            checklist[0]["status"] = "success"
-            checklist[0]["detail"] = f"Reachable {self.config.pg_host}:{self.config.pg_port}"
-        except Exception as socket_err:
-            checklist[0]["status"] = "failed"
-            checklist[0]["detail"] = f"Host '{self.config.pg_host}:{self.config.pg_port}' is unreachable ({socket_err}). Check IP address, port, firewall rules, or VPN."
+            # Step 1: TCP Handshake Check (3s Timeout)
+            try:
+                sock = socket.create_connection((self.config.pg_host, self.config.pg_port), timeout=3.0)
+                sock.close()
+                checklist[0]["status"] = "success"
+                checklist[0]["detail"] = f"Reachable {self.config.pg_host}:{self.config.pg_port}"
+            except Exception as socket_err:
+                checklist[0]["status"] = "failed"
+                checklist[0]["detail"] = f"Host '{self.config.pg_host}:{self.config.pg_port}' is unreachable ({socket_err}). Check IP address, port, firewall rules, or VPN."
+                return {
+                    "status": "failed",
+                    "message": f"PostgreSQL host unreachable: {socket_err}",
+                    "checklist": checklist
+                }
+
+            # Step 2: Authentication Test
+            try:
+                self.connect()
+                with self.conn.cursor() as cur:
+                    cur.execute("SELECT 1;")
+                checklist[1]["status"] = "success"
+                checklist[1]["detail"] = f"Authenticated as user '{self.config.pg_user}' on db '{self.config.pg_database}'"
+            except Exception as auth_err:
+                checklist[1]["status"] = "failed"
+                checklist[1]["detail"] = f"Authentication failed: {str(auth_err)}"
+                return {
+                    "status": "failed",
+                    "message": f"User Authentication failed: {str(auth_err)}",
+                    "checklist": checklist
+                }
+
+            # Step 3: Version Check
+            try:
+                with self.conn.cursor() as cur:
+                    cur.execute("SELECT version();")
+                    version = cur.fetchone()[0]
+                checklist[2]["status"] = "success"
+                checklist[2]["detail"] = f"{version.split(',')[0]}"
+            except Exception as ver_err:
+                checklist[2]["status"] = "warning"
+                checklist[2]["detail"] = f"Could not read version: {str(ver_err)}"
+
+            # Step 4: Catalog & Table Inspection (Fast pg_tables query)
+            table_count = 0
+            try:
+                with self.conn.cursor() as cur:
+                    try:
+                        cur.execute("SELECT COUNT(*) FROM pg_tables WHERE schemaname = %s;", (self.config.pg_schema,))
+                        table_count = cur.fetchone()[0]
+                    except Exception:
+                        self.conn.rollback()
+                        cur.execute("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = %s AND table_type = 'BASE TABLE';", (self.config.pg_schema,))
+                        table_count = cur.fetchone()[0]
+
+                checklist[3]["status"] = "success"
+                checklist[3]["detail"] = f"Schema '{self.config.pg_schema}' contains {table_count} base table(s)."
+            except Exception as cat_err:
+                checklist[3]["status"] = "warning"
+                checklist[3]["detail"] = f"Catalog query warning: {str(cat_err)}"
+
             return {
-                "status": "failed",
-                "message": f"PostgreSQL host unreachable: {socket_err}",
+                "status": "success",
+                "message": "PostgreSQL connection test succeeded!",
+                "database": self.config.pg_database,
+                "schema": self.config.pg_schema,
+                "table_count": table_count,
                 "checklist": checklist
             }
 
-        # Step 2: Authentication Test
-        try:
-            self.connect()
-            with self.conn.cursor() as cur:
-                cur.execute("SELECT 1;")
-            checklist[1]["status"] = "success"
-            checklist[1]["detail"] = f"Authenticated as user '{self.config.pg_user}' on db '{self.config.pg_database}'"
-        except Exception as auth_err:
-            checklist[1]["status"] = "failed"
-            checklist[1]["detail"] = f"Authentication failed: {str(auth_err)}"
-            return {
-                "status": "failed",
-                "message": f"User Authentication failed: {str(auth_err)}",
-                "checklist": checklist
-            }
+        finally:
+            self.close()
 
-        # Step 3: Version Check
-        try:
-            with self.conn.cursor() as cur:
-                cur.execute("SELECT version();")
-                version = cur.fetchone()[0]
-            checklist[2]["status"] = "success"
-            checklist[2]["detail"] = f"{version.split(',')[0]}"
-        except Exception as ver_err:
-            checklist[2]["status"] = "warning"
-            checklist[2]["detail"] = f"Could not read version: {str(ver_err)}"
-
-        # Step 4: Catalog & Table Inspection (Fast pg_tables query)
-        table_count = 0
-        try:
-            with self.conn.cursor() as cur:
-                try:
-                    cur.execute("SELECT COUNT(*) FROM pg_tables WHERE schemaname = %s;", (self.config.pg_schema,))
-                    table_count = cur.fetchone()[0]
-                except Exception:
-                    self.conn.rollback()
-                    cur.execute("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = %s AND table_type = 'BASE TABLE';", (self.config.pg_schema,))
-                    table_count = cur.fetchone()[0]
-
-            checklist[3]["status"] = "success"
-            checklist[3]["detail"] = f"Schema '{self.config.pg_schema}' contains {table_count} base table(s)."
-        except Exception as cat_err:
-            checklist[3]["status"] = "warning"
-            checklist[3]["detail"] = f"Catalog query warning: {str(cat_err)}"
-
-        return {
-            "status": "success",
-            "message": "PostgreSQL connection test succeeded!",
-            "database": self.config.pg_database,
-            "schema": self.config.pg_schema,
-            "table_count": table_count,
-            "checklist": checklist
-        }
 
     def get_tables(self, schema: str = None) -> List[str]:
         """Retrieves list of user base tables in the specified PostgreSQL / EnterpriseDB schema."""

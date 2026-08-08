@@ -562,9 +562,13 @@
       }
     }
 
-    async function safeFetchJson(url, options) {
+    async function safeFetchJson(url, options = {}, timeoutMs = 15000) {
+      const controller = new AbortController();
+      const id = setTimeout(() => controller.abort(), timeoutMs);
       try {
-        const res = await fetch(url, options);
+        const opts = { ...options, signal: controller.signal };
+        const res = await fetch(url, opts);
+        clearTimeout(id);
         const text = await res.text();
         let data;
         try {
@@ -574,9 +578,14 @@
         }
         return { ok: res.ok, status: res.status, data: data };
       } catch (err) {
-        return { ok: false, status: 0, data: { message: str(err) } };
+        clearTimeout(id);
+        if (err.name === 'AbortError') {
+          return { ok: false, status: 504, data: { message: `Request timed out after ${timeoutMs/1000}s. Inspect database host reachability.` } };
+        }
+        return { ok: false, status: 0, data: { message: String(err) } };
       }
     }
+
 
     // Remote Profiles Management via LocalStorage
     function getProfiles() {
