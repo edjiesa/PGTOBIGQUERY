@@ -818,6 +818,16 @@
               badge.style.background = 'rgba(16, 185, 129, 0.15)';
             }
             if (btn) btn.disabled = false;
+
+            // Save last sync time to localStorage
+            const nowStr = new Date().toLocaleString('id-ID', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit', second:'2-digit' });
+            localStorage.setItem(`pg2bq_batch_lastSync_${batchIdx}`, nowStr);
+            // Update the last sync label in UI immediately
+            const syncLabel = document.getElementById(`batchLastSync_${batchIdx}`);
+            if (syncLabel) {
+              syncLabel.innerHTML = `<span style="color:#6ee7b7;font-size:0.72rem;">✓ Last sync: ${nowStr}</span>`;
+            }
+
             savePersistentState();
             resolve(result);
           }
@@ -1302,6 +1312,7 @@
               <div style="display: flex; gap: 0.5rem; align-items: center;">
                 <span id="batchBadge_${b.batch_index}" class="status-badge" style="${badgeStyle}">${badgeText}</span>
                 <button id="btnSyncBatch_${b.batch_index}" class="btn btn-primary" style="padding: 0.35rem 0.75rem; font-size: 0.8rem;" onclick="syncSpecificBatch(${b.batch_index})">▶ Sync Kelompok Ini</button>
+                <span id="batchLastSync_${b.batch_index}" style="font-size:0.72rem; color: var(--text-muted); white-space: nowrap;">${(function() { const t = localStorage.getItem('pg2bq_batch_lastSync_' + b.batch_index); return t ? '<span style="color:#6ee7b7;">✓ Last sync: ' + t + '</span>' : '<span style="color:#6b7280; font-style:italic;">Belum pernah sync</span>'; })()}</span>
               </div>
             </div>
 
