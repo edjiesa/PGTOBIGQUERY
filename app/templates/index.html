@@ -472,18 +472,24 @@
           <ul id="bqChecklist" class="airbyte-checklist"></ul>
         </div>
 
-        <!-- 1-Click Master Automation Card -->
+        <!-- Selective Batch Sync Master Card -->
         <div class="card" style="margin-bottom: 1.5rem; background: linear-gradient(135deg, rgba(16, 185, 129, 0.12), rgba(59, 130, 246, 0.12)); border: 1px solid rgba(16, 185, 129, 0.3);">
           <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
             <div>
-              <div style="font-weight: 700; font-size: 1.1rem; color: #10b981;">🚀 1-CLICK PROSES MIGRASI OTOMATIS</div>
+              <div style="font-weight: 700; font-size: 1.1rem; color: #10b981;">🚀 SYNC OTOMATIS KELOMPOK TERPILIH</div>
               <div style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.2rem;">
-                Muat 1.400+ tabel &rarr; Urutkan baris terkecil ke terbesar &rarr; Kelompokkan per 100 tabel &rarr; Eksekusi otomatis berurutan (1-Process)
+                Centang kelompok tabel yang ingin Anda jalankan, lalu klik tombol eksekusi.
               </div>
             </div>
-            <button id="btnOneClickSync" class="btn btn-primary" style="padding: 0.75rem 1.5rem; font-size: 0.95rem; font-weight: 700; background: linear-gradient(135deg, #10b981, #059669); border: none; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);" onclick="startOneClickFullAutomatedSync()">
-              ⚡ JALANKAN SYNC OTOMATIS (1-CLICK)
-            </button>
+            <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+              <label style="display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; font-weight: 600; cursor: pointer; color: var(--text-main); background: rgba(0,0,0,0.3); padding: 0.5rem 0.75rem; border-radius: 6px; border: 1px solid var(--border-color);">
+                <input type="checkbox" id="selectAllBatchesCheckbox" checked onchange="toggleSelectAllBatches(this.checked)">
+                <span>Pilih Semua Kelompok</span>
+              </label>
+              <button id="btnSyncSelectedBatches" class="btn btn-primary" style="padding: 0.75rem 1.25rem; font-size: 0.95rem; font-weight: 700; background: linear-gradient(135deg, #10b981, #059669); border: none; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);" onclick="startSelectedBatchesSync()">
+                ⚡ JALANKAN SYNC (<span id="selectedBatchCountText">0</span> KELOMPOK TERPILIH)
+              </button>
+            </div>
           </div>
         </div>
 
@@ -496,7 +502,6 @@
             </div>
             <div style="display: flex; gap: 0.5rem;">
               <button class="btn btn-secondary" onclick="loadTableBatches()">📊 Muat / Refresh Kelompok Tabel</button>
-              <button id="btnSyncAllBatches" class="btn btn-primary" style="display: none;" onclick="startAllBatchesSequentially()">🚀 Sync Semua Kelompok Berurutan</button>
             </div>
           </div>
 
@@ -507,12 +512,13 @@
 
           <div id="batchContainer" style="display: flex; flex-direction: column; gap: 1rem; margin-top: 1rem; max-height: 600px; overflow-y: auto; padding-right: 0.25rem;">
             <div style="text-align: center; padding: 1.5rem; color: var(--text-muted); border: 1px dashed var(--border-color); border-radius: 8px;">
-              ⚡ Jalankan <strong>"🔍 Airbyte Test Remote PostgreSQL"</strong> atau <strong>"⚡ JALANKAN SYNC OTOMATIS (1-CLICK)"</strong> untuk memuat & mengelompokkan tabel secara otomatis.
+              ⚡ Jalankan <strong>"🔍 Airbyte Test Remote PostgreSQL"</strong> untuk memuat & mengelompokkan tabel secara otomatis.
             </div>
           </div>
         </div>
       </div>
     </div>
+
 
 
 
@@ -1134,11 +1140,24 @@
       loadedBatchesData = batches;
       document.getElementById('batchSummaryHeader').style.display = 'flex';
       document.getElementById('batchSummaryText').innerHTML = `Total: <strong>${tablesSorted.length.toLocaleString()}</strong> Tabel terbagi menjadi <strong>${batches.length}</strong> Kelompok (max 100 tabel/kelompok)`;
-      document.getElementById('btnSyncAllBatches').style.display = 'inline-block';
       renderBatchCards(loadedBatchesData);
       appendLog(`✓ Berhasil mengelompokkan secara instan (0.001s): ${batches.length} kelompok dari ${tablesSorted.length.toLocaleString()} tabel remote!`, 'success');
     }
 
+
+    function toggleSelectAllBatches(isChecked) {
+      const checkboxes = document.querySelectorAll('.batch-select-checkbox');
+      checkboxes.forEach(cb => cb.checked = isChecked);
+      updateSelectedBatchCount();
+    }
+
+    function updateSelectedBatchCount() {
+      const checkedBoxes = document.querySelectorAll('.batch-select-checkbox:checked');
+      const countEl = document.getElementById('selectedBatchCountText');
+      if (countEl) {
+        countEl.innerText = checkedBoxes.length;
+      }
+    }
 
     function renderBatchCards(batches) {
       const container = document.getElementById('batchContainer');
@@ -1157,11 +1176,11 @@
           </div>
         `).join('');
 
-
         container.innerHTML += `
           <div id="batchCard_${b.batch_index}" style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: 8px; padding: 1rem;">
             <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
-              <div>
+              <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <input type="checkbox" class="batch-select-checkbox" data-batch-index="${b.batch_index}" checked onchange="updateSelectedBatchCount()" style="width: 18px; height: 18px; cursor: pointer;">
                 <span style="font-weight: 700; font-size: 1.05rem; color: var(--text-main);">${b.batch_name}</span>
                 <span class="status-badge" style="margin-left: 0.5rem; background: rgba(59,130,246,0.15); color: #60a5fa; border: 1px solid rgba(59,130,246,0.3);">${b.table_count} Tabel</span>
               </div>
@@ -1189,7 +1208,9 @@
           </div>
         `;
       });
+      updateSelectedBatchCount();
     }
+
 
     async function syncSingleTable(tableName) {
       await saveConfig();
@@ -1213,80 +1234,40 @@
 
 
 
-    async function startAllBatchesSequentially() {
+    async function startSelectedBatchesSync() {
       if (loadedBatchesData.length === 0) {
         await loadTableBatches();
       }
       if (loadedBatchesData.length === 0) return;
 
-      const btn = document.getElementById('btnSyncAllBatches');
-      if (btn) btn.disabled = true;
-
-      appendLog(`🚀 Memulai eksekusi ${loadedBatchesData.length} Kelompok Tabel berurutan dari yang terkecil...`, 'info');
-
-      for (let i = 0; i < loadedBatchesData.length; i++) {
-        const batch = loadedBatchesData[i];
-        appendLog(`▶ Executing Batch ${i+1}/${loadedBatchesData.length}: ${batch.batch_name}...`, 'info');
-        await syncSpecificBatch(batch.batch_index);
-        await new Promise(r => setTimeout(r, 3000));
+      const checkedBoxes = Array.from(document.querySelectorAll('.batch-select-checkbox:checked'));
+      if (checkedBoxes.length === 0) {
+        alert('Silakan centang setidaknya 1 kelompok tabel yang ingin Anda jalankan.');
+        return;
       }
 
-      appendLog(`🎉 Selesai mememicu seluruh ${loadedBatchesData.length} Kelompok Tabel!`, 'success');
+      const selectedBatchIndices = checkedBoxes.map(cb => parseInt(cb.getAttribute('data-batch-index'))).sort((a, b) => a - b);
+
+      const btn = document.getElementById('btnSyncSelectedBatches');
+      if (btn) btn.disabled = true;
+
+      appendLog(`=====================================================`, 'info');
+      appendLog(`🚀 MEMULAI SYNC OTOMATIS UNTUK ${selectedBatchIndices.length} KELOMPOK TERPILIH`, 'success');
+      appendLog(`=====================================================`, 'info');
+
+      for (let i = 0; i < selectedBatchIndices.length; i++) {
+        const batchIdx = selectedBatchIndices[i];
+        const batch = loadedBatchesData.find(b => b.batch_index === batchIdx);
+        const batchName = batch ? batch.batch_name : `Kelompok #${batchIdx}`;
+        appendLog(`▶ [${i+1}/${selectedBatchIndices.length}] Executing ${batchName}...`, 'info');
+        await syncSpecificBatch(batchIdx);
+        await new Promise(r => setTimeout(r, 2000));
+      }
+
+      appendLog(`🎉 Selesai mengeksekusi seluruh ${selectedBatchIndices.length} Kelompok Tabel terpilih!`, 'success');
       if (btn) btn.disabled = false;
     }
 
-    async function startOneClickFullAutomatedSync() {
-      const btn = document.getElementById('btnOneClickSync');
-      if (btn) btn.disabled = true;
-
-      try {
-        await saveConfig();
-
-        appendLog('=====================================================', 'info');
-        appendLog('🚀 MEMULAI PROSES MIGRASI OTOMATIS 1-CLICK (1 PROCESS AUTOMATION)', 'success');
-        appendLog('=====================================================', 'info');
-
-        // Step 1: Load tables if not already in memory
-        if (!rawLoadedTables || rawLoadedTables.length === 0) {
-          appendLog('⏳ [Langkah 1/3] Mengambil daftar 1.400+ tabel dari remote database...', 'info');
-          const startRes = await safeFetchJson('/api/tables');
-          let data;
-          if (startRes.ok && startRes.data.status === 'started') {
-            try {
-              data = await pollJobUntilDone(startRes.data.job_id);
-            } catch (err) {
-              data = { status: 'error', message: String(err) };
-            }
-          } else {
-            data = startRes.data;
-          }
-
-          if (data.status === 'success' && data.tables) {
-            rawLoadedTables = data.tables;
-          } else {
-            appendLog(`✗ Gagal mengambil daftar tabel: ${data.message || 'Error'}`, 'error');
-            return;
-          }
-        }
-
-        // Step 2: Instant group tables by row count ASC
-        appendLog(`⏳ [Langkah 2/3] Mengelompokkan ${rawLoadedTables.length.toLocaleString()} tabel per 100 tabel (urut baris terkecil -> terbesar)...`, 'info');
-        await loadTableBatches();
-
-        if (loadedBatchesData.length === 0) {
-          appendLog('✗ Gagal mengelompokkan tabel.', 'error');
-          return;
-        }
-
-        // Step 3: Run all batches sequentially from smallest to largest
-        appendLog(`⏳ [Langkah 3/3] Memulai eksekusi otomatis ${loadedBatchesData.length} Kelompok Tabel secara berurutan...`, 'info');
-        await startAllBatchesSequentially();
-      } catch (err) {
-        appendLog(`✗ Terjadi kesalahan pada proses 1-Click Sync: ${err}`, 'error');
-      } finally {
-        if (btn) btn.disabled = false;
-      }
-    }
 
 
     window.onload = () => {
