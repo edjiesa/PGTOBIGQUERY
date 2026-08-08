@@ -487,50 +487,33 @@
           </div>
         </div>
 
-        <!-- Table Selector & Migration Action -->
-        <div class="card">
-          <div class="card-header">
-            <div class="card-title">📦 Remote PostgreSQL Tables</div>
-            <button class="btn btn-secondary" onclick="loadTables()">Muat Tabel Remote</button>
-          </div>
-
-
-          <div id="tableContainer" class="table-list">
-            <div style="text-align: center; padding: 2rem; color: var(--text-muted);">
-              Klik "Muat Tabel Remote" untuk melihat daftar tabel.
-            </div>
-          </div>
-
-          <div style="margin-top: 1.5rem; display: flex; gap: 1rem;">
-            <button class="btn btn-secondary" onclick="startMigration(true)">Dry Run (Uji Skema)</button>
-            <button class="btn btn-primary" style="flex: 1;" onclick="startMigration(false)">⚡ Jalankan Migrasi Remote</button>
-          </div>
         <!-- Batch Synchronization Manager Card (Urut Rows Terkecil -> Terbesar) -->
         <div class="card" style="margin-top: 1.5rem;">
           <div class="card-header" style="flex-wrap: wrap; gap: 0.5rem; align-items: center;">
             <div>
               <div class="card-title">📦 Batch Sync Manager (100 Tabel Per Kelompok)</div>
-              <div style="font-size: 0.8rem; color: var(--text-muted);">Diurutkan dari jumlah baris <strong>terkecil ke terbesar</strong> (dapat dieksekusi per kelompok)</div>
+              <div style="font-size: 0.8rem; color: var(--text-muted);">Diurutkan dari jumlah baris <strong>terkecil ke terbesar</strong> (eksekusi per kelompok atau per 1 tabel)</div>
             </div>
             <div style="display: flex; gap: 0.5rem;">
-              <button class="btn btn-secondary" onclick="loadTableBatches()">📊 Kelompokkan Tabel (100 per Kelompok)</button>
+              <button class="btn btn-secondary" onclick="loadTableBatches()">📊 Muat / Refresh Kelompok Tabel</button>
               <button id="btnSyncAllBatches" class="btn btn-primary" style="display: none;" onclick="startAllBatchesSequentially()">🚀 Sync Semua Kelompok Berurutan</button>
             </div>
           </div>
 
           <div id="batchSummaryHeader" style="display: none; padding: 0.75rem 1rem; background: rgba(59,130,246,0.1); border: 1px solid rgba(59,130,246,0.2); border-radius: 8px; font-size: 0.85rem; margin-top: 1rem; justify-content: space-between; align-items: center;">
             <span id="batchSummaryText">Total: 0 Tabel terbagi menjadi 0 Kelompok</span>
-            <span style="font-size: 0.8rem; color: var(--text-muted);">Klik <strong>"▶ Sync Kelompok Ini"</strong> untuk eksekusi mandiri per kelompok</span>
+            <span style="font-size: 0.8rem; color: var(--text-muted);">Eksekusi per kelompok <strong>"▶ Sync Kelompok Ini"</strong> atau 1 per 1 tabel <strong>"⚡ Sync Tabel Ini"</strong></span>
           </div>
 
-          <div id="batchContainer" style="display: flex; flex-direction: column; gap: 1rem; margin-top: 1rem; max-height: 550px; overflow-y: auto; padding-right: 0.25rem;">
+          <div id="batchContainer" style="display: flex; flex-direction: column; gap: 1rem; margin-top: 1rem; max-height: 600px; overflow-y: auto; padding-right: 0.25rem;">
             <div style="text-align: center; padding: 1.5rem; color: var(--text-muted); border: 1px dashed var(--border-color); border-radius: 8px;">
-              Klik <strong>"📊 Kelompokkan Tabel (100 per Kelompok)"</strong> untuk mengelompokkan tabel dari ukuran terkecil ke terbesar.
+              ⚡ Jalankan <strong>"🔍 Airbyte Test Remote PostgreSQL"</strong> atau <strong>"⚡ JALANKAN SYNC OTOMATIS (1-CLICK)"</strong> untuk memuat & mengelompokkan tabel secara otomatis.
             </div>
           </div>
         </div>
       </div>
     </div>
+
 
 
     <!-- Terminal & Progress Logs -->
@@ -790,6 +773,12 @@
         badge.style.color = '#10b981';
         badge.style.borderColor = 'rgba(16, 185, 129, 0.4)';
         appendLog(`✓ Remote PostgreSQL Airbyte Test PASSED (${data.table_count} tables found)`, 'success');
+        
+        // Auto-trigger table catalog loading & 100-table batch grouping right after Diagnostic Checklist completes!
+        appendLog('⚡ Diagnostic Checklist SELESAI: Otomatis mengelompokkan 1.381+ tabel per 100 kelompok...', 'info');
+        setTimeout(() => {
+          loadTableBatches();
+        }, 500);
       } else {
         badge.innerText = 'FAILED';
         badge.style.color = '#ef4444';
@@ -797,6 +786,7 @@
         appendLog(`✗ Remote PostgreSQL Test FAILED: ${data.message || 'Connection Error'}`, 'error');
       }
     }
+
 
     async function testBigQueryAirbyte() {
       await saveConfig();
@@ -986,7 +976,17 @@
       const container = document.getElementById('batchContainer');
       container.innerHTML = '';
       batches.forEach(b => {
-        const tableListHtml = b.table_details.map(t => `<div style="display:flex; justify-content:space-between; padding: 2px 0;"><span>${t.table_name}</span><span style="color:#9ca3af;">${t.row_count.toLocaleString()} baris</span></div>`).join('');
+        const tableListHtml = b.table_details.map(t => `
+          <div style="display:flex; justify-content:space-between; align-items:center; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.05);">
+            <div>
+              <span style="font-weight:600; color:var(--text-main);">${t.table_name}</span>
+              <span style="color:#9ca3af; margin-left: 0.4rem; font-size:0.75rem;">(${t.column_count || '?'} kolom | ${(t.row_count || 0).toLocaleString()} baris)</span>
+            </div>
+            <button class="btn btn-secondary" style="padding: 0.15rem 0.5rem; font-size: 0.725rem; border-color: rgba(59,130,246,0.4); color: #60a5fa; background: rgba(59,130,246,0.1);" onclick="syncSingleTable('${t.table_name}')">
+              ⚡ Sync Tabel Ini
+            </button>
+          </div>
+        `).join('');
 
         container.innerHTML += `
           <div id="batchCard_${b.batch_index}" style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: 8px; padding: 1rem;">
@@ -1011,8 +1011,8 @@
             </div>
 
             <details style="margin-top: 0.75rem; font-size: 0.8rem; color: var(--text-muted);">
-              <summary style="cursor: pointer; color: var(--primary-color);">👁️ Lihat Daftar ${b.table_count} Tabel dalam Kelompok Ini</summary>
-              <div style="margin-top: 0.5rem; max-height: 160px; overflow-y: auto; background: rgba(0,0,0,0.3); padding: 0.75rem; border-radius: 6px; font-family: monospace; border: 1px solid var(--border-color);">
+              <summary style="cursor: pointer; color: var(--primary-color);">👁️ Lihat & Sync 1 per 1 dari ${b.table_count} Tabel dalam Kelompok Ini</summary>
+              <div style="margin-top: 0.5rem; max-height: 200px; overflow-y: auto; background: rgba(0,0,0,0.3); padding: 0.75rem; border-radius: 6px; font-family: monospace; border: 1px solid var(--border-color);">
                 ${tableListHtml}
               </div>
             </details>
@@ -1020,6 +1020,26 @@
         `;
       });
     }
+
+    async function syncSingleTable(tableName) {
+      await saveConfig();
+      appendLog(`🚀 Memulai migrasi 1 tabel spesifik: ${tableName}...`, 'info');
+      try {
+        const res = await safeFetchJson('/api/migrate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tables: [tableName], dry_run: false })
+        });
+        if (res.ok) {
+          appendLog(`✓ Tabel '${tableName}' berhasil diproses di background server.`, 'success');
+        } else {
+          appendLog(`✗ Error sync tabel '${tableName}': ${res.data.message}`, 'error');
+        }
+      } catch (err) {
+        appendLog(`✗ Failed sync tabel '${tableName}': ${err}`, 'error');
+      }
+    }
+
 
     async function syncSpecificBatch(batchIdx) {
       await saveConfig();
