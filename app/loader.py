@@ -263,12 +263,35 @@ class BigQueryLoader:
         )
 
         logger.info(f"Starting BigQuery Load Job for table '{table_id}' ({len(bq_schema)} columns) from {parquet_file_path}...")
-        with open(parquet_file_path, "rb") as source_file:
-            job = self.client.load_table_from_file(source_file, table_ref, job_config=job_config)
+        try:
+            with open(parquet_file_path, "rb") as source_file:
+                job = self.client.load_table_from_file(source_file, table_ref, job_config=job_config)
+            job.result()  # Wait for job completion
+            logger.info(f"BigQuery Load Job completed for table '{table_id}'. Output rows: {job.output_rows}")
+            return job.output_rows or 0
+        except Exception as load_err:
+            logger.warning(f"Primary BigQuery load job failed for '{table_id}' ({load_err}). Retrying with all-string schema fallback...")
+            try:
+                self.client.delete_table(table_ref, not_found_ok=True)
+                string_schema = [
+                    bigquery.SchemaField(f.name, "STRING", mode="NULLABLE", description=f.description)
+                    for f in bq_schema
+                ]
+                fallback_job_config = bigquery.LoadJobConfig(
+                    schema=string_schema,
+                    source_format=bigquery.SourceFormat.PARQUET,
+                    write_disposition="WRITE_TRUNCATE",
+                    autodetect=False
+                )
+                with open(parquet_file_path, "rb") as source_file:
+                    fallback_job = self.client.load_table_from_file(source_file, table_ref, job_config=fallback_job_config)
+                fallback_job.result()
+                logger.info(f"Fallback BigQuery Load Job completed for table '{table_id}'. Output rows: {fallback_job.output_rows}")
+                return fallback_job.output_rows or 0
+            except Exception as final_err:
+                logger.error(f"Both primary and fallback load jobs failed for table '{table_id}': {final_err}")
+                raise final_err
 
-        job.result()  # Wait for job completion
-        logger.info(f"BigQuery Load Job completed for table '{table_id}'. Output rows: {job.output_rows}")
-        return job.output_rows or 0
 
     def create_empty_table_if_not_exists(
         self,

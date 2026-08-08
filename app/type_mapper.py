@@ -137,27 +137,41 @@ def convert_value_for_pyarrow(val: Any, bq_type: str, mode: str) -> Any:
 
         if bq_type in ("DATETIME", "TIMESTAMP"):
             if isinstance(val, datetime.datetime):
+                if val.year < 1900 or val.year > 2200:
+                    return None
                 return val
             if isinstance(val, datetime.date):
+                if val.year < 1900 or val.year > 2200:
+                    return None
                 return datetime.datetime.combine(val, datetime.time.min)
-            val_str = str(val).strip()
-            if not val_str or val_str.startswith("0000"):
+            val_str = str(val).strip().lower()
+            if not val_str or val_str.startswith("0000") or "infinity" in val_str or "bc" in val_str:
                 return None
             try:
-                return datetime.datetime.fromisoformat(val_str.replace("Z", "+00:00"))
+                dt = datetime.datetime.fromisoformat(val_str.replace("z", "+00:00"))
+                if dt.year < 1900 or dt.year > 2200:
+                    return None
+                return dt
             except Exception:
                 return None
 
         if bq_type == "DATE":
             if isinstance(val, datetime.date):
+                if val.year < 1900 or val.year > 2200:
+                    return None
                 return val
             if isinstance(val, datetime.datetime):
+                if val.year < 1900 or val.year > 2200:
+                    return None
                 return val.date()
-            val_str = str(val).strip()
-            if not val_str or val_str.startswith("0000"):
+            val_str = str(val).strip().lower()
+            if not val_str or val_str.startswith("0000") or "infinity" in val_str or "bc" in val_str:
                 return None
             try:
-                return datetime.date.fromisoformat(val_str)
+                d = datetime.date.fromisoformat(val_str)
+                if d.year < 1900 or d.year > 2200:
+                    return None
+                return d
             except Exception:
                 return None
 
@@ -166,8 +180,13 @@ def convert_value_for_pyarrow(val: Any, bq_type: str, mode: str) -> Any:
 
         if bq_type == "NUMERIC" or bq_type == "FLOAT64":
             if isinstance(val, (int, float)):
+                val_str_lower = str(val).lower()
+                if "nan" in val_str_lower or "inf" in val_str_lower:
+                    return None
                 return val
-            val_str = str(val).replace("$", "").replace(",", "").strip()
+            val_str = str(val).replace("$", "").replace(",", "").strip().lower()
+            if not val_str or "nan" in val_str or "inf" in val_str:
+                return None
             try:
                 return float(val_str) if bq_type == "FLOAT64" else val_str
             except Exception:
@@ -176,10 +195,14 @@ def convert_value_for_pyarrow(val: Any, bq_type: str, mode: str) -> Any:
         if bq_type == "INT64":
             if isinstance(val, int):
                 return val
+            val_str = str(val).strip().lower()
+            if not val_str or "nan" in val_str or "inf" in val_str:
+                return None
             try:
-                return int(float(str(val).strip()))
+                return int(float(val_str))
             except Exception:
                 return None
+
 
         if bq_type == "BOOL":
             if isinstance(val, bool):
