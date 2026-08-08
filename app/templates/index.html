@@ -563,7 +563,7 @@
       }
     }
 
-    async function safeFetchJson(url, options = {}, timeoutMs = 15000) {
+    async function safeFetchJson(url, options = {}, timeoutMs = 300000) {
       const controller = new AbortController();
       const id = setTimeout(() => controller.abort(), timeoutMs);
       try {
@@ -586,6 +586,7 @@
         return { ok: false, status: 0, data: { message: String(err) } };
       }
     }
+
 
 
     // Remote Profiles Management via LocalStorage
@@ -778,8 +779,9 @@
     async function loadTables() {
       await saveConfig();
       appendLog('Mengambil daftar tabel dari Remote PostgreSQL...', 'info');
-      const res = await safeFetchJson('/api/tables', {}, 60000);
+      const res = await safeFetchJson('/api/tables', {}, 300000);
       const data = res.data;
+
 
 
       if (res.ok && data.status === 'success') {

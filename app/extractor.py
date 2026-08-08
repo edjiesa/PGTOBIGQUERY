@@ -31,7 +31,7 @@ class PostgresExtractor:
             "password": self.config.pg_password,
             "dbname": self.config.pg_database,
             "sslmode": self.config.pg_sslmode or "disable",
-            "connect_timeout": 3
+            "connect_timeout": 60
         }
 
         try:
@@ -55,7 +55,7 @@ class PostgresExtractor:
     def test_connection(self) -> Dict[str, Any]:
         """
         Performs Airbyte-style step-by-step connection diagnostics for PostgreSQL / EnterpriseDB 10.x.
-        Each step is evaluated independently with guaranteed cleanup.
+        Extended timeout support for large databases with 1000+ tables.
         """
         self.close()
         checklist = [
@@ -66,9 +66,9 @@ class PostgresExtractor:
         ]
 
         try:
-            # Step 1: TCP Handshake Check (3s Timeout)
+            # Step 1: TCP Handshake Check (10s Timeout)
             try:
-                sock = socket.create_connection((self.config.pg_host, self.config.pg_port), timeout=3.0)
+                sock = socket.create_connection((self.config.pg_host, self.config.pg_port), timeout=10.0)
                 sock.close()
                 checklist[0]["status"] = "success"
                 checklist[0]["detail"] = f"Reachable {self.config.pg_host}:{self.config.pg_port}"
@@ -81,26 +81,13 @@ class PostgresExtractor:
                     "checklist": checklist
                 }
 
-            # Step 2: Authentication Test (Hard 5s Timeout)
-            def do_connect():
+            # Step 2: Authentication Test
+            try:
                 self.connect()
                 with self.conn.cursor() as cur:
                     cur.execute("SELECT 1;")
-
-            try:
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                    future = executor.submit(do_connect)
-                    future.result(timeout=5.0)
                 checklist[1]["status"] = "success"
                 checklist[1]["detail"] = f"Authenticated as user '{self.config.pg_user}' on db '{self.config.pg_database}'"
-            except concurrent.futures.TimeoutError:
-                checklist[1]["status"] = "failed"
-                checklist[1]["detail"] = "Authentication timed out after 5s. If SSL is not configured on server, set SSL Mode to 'disable'."
-                return {
-                    "status": "failed",
-                    "message": "User Authentication timed out after 5s. Try setting SSL Mode to 'disable'.",
-                    "checklist": checklist
-                }
             except Exception as auth_err:
                 checklist[1]["status"] = "failed"
                 checklist[1]["detail"] = f"Authentication failed: {str(auth_err)}"
@@ -109,6 +96,7 @@ class PostgresExtractor:
                     "message": f"User Authentication failed: {str(auth_err)}",
                     "checklist": checklist
                 }
+
 
 
             # Step 3: Version Check
