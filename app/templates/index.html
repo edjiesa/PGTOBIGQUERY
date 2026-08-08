@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PostgreSQL 10.4 to BigQuery Migration Hub</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-dark: #0a0e1a;
+      --card-bg: rgba(18, 26, 47, 0.7);
+      --card-border: rgba(255, 255, 255, 0.08);
+      --primary-cyan: #00f2fe;
+      --primary-blue: #4facfe;
+      --accent-purple: #7f53ac;
+      --accent-magenta: #647eee;
+      --text-main: #f1f5f9;
+      --text-muted: #94a3b8;
+      --success: #10b981;
+      --error: #ef4444;
+      --warning: #f59e0b;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      background: var(--bg-dark);
+      background-image: 
+        radial-gradient(at 0% 0%, rgba(79, 172, 254, 0.15) 0px, transparent 50%),
+        radial-gradient(at 100% 100%, rgba(127, 83, 172, 0.15) 0px, transparent 50%);
+      color: var(--text-main);
+      min-height: 100vh;
+      padding: 2rem;
+    }
+
+    .container {
+      max-width: 1280px;
+      margin: 0 auto;
+    }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 2rem;
+      padding-bottom: 1.5rem;
+      border-bottom: 1px solid var(--card-border);
+    }
+
+    .logo-area h1 {
+      font-size: 1.75rem;
+      font-weight: 700;
+      background: linear-gradient(135deg, var(--primary-cyan), var(--primary-blue));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .logo-area p {
+      color: var(--text-muted);
+      font-size: 0.9rem;
+      margin-top: 0.25rem;
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: rgba(16, 185, 129, 0.1);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      color: var(--success);
+      padding: 0.5rem 1rem;
+      border-radius: 9999px;
+      font-size: 0.85rem;
+      font-weight: 600;
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--success);
+      box-shadow: 0 0 10px var(--success);
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.5rem;
+      margin-bottom: 2rem;
+    }
+
+    @media (max-width: 900px) {
+      .grid-2 { grid-template-columns: 1fr; }
+    }
+
+    .card {
+      background: var(--card-bg);
+      backdrop-filter: blur(16px);
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
+      padding: 1.5rem;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+    }
+
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1.25rem;
+    }
+
+    .card-title {
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .form-group {
+      margin-bottom: 1rem;
+    }
+
+    .form-group label {
+      display: block;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      margin-bottom: 0.35rem;
+      font-weight: 500;
+    }
+
+    .form-control {
+      width: 100%;
+      background: rgba(10, 14, 26, 0.6);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 0.65rem 0.85rem;
+      color: var(--text-main);
+      font-family: inherit;
+      font-size: 0.9rem;
+      transition: all 0.2s ease;
+    }
+
+    .form-control:focus {
+      outline: none;
+      border-color: var(--primary-blue);
+      box-shadow: 0 0 0 3px rgba(79, 172, 254, 0.2);
+    }
+
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      padding: 0.75rem 1.5rem;
+      border-radius: 10px;
+      font-weight: 600;
+      font-size: 0.9rem;
+      cursor: pointer;
+      border: none;
+      transition: all 0.25s ease;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--primary-cyan), var(--primary-blue));
+      color: #000;
+      box-shadow: 0 4px 15px rgba(0, 242, 254, 0.3);
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(0, 242, 254, 0.5);
+    }
+
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--card-border);
+      color: var(--text-main);
+    }
+
+    .btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.1);
+    }
+
+    .table-list {
+      max-height: 280px;
+      overflow-y: auto;
+      margin-top: 1rem;
+    }
+
+    .table-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.75rem 1rem;
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      margin-bottom: 0.5rem;
+    }
+
+    .table-name {
+      font-weight: 600;
+      font-size: 0.9rem;
+      color: var(--primary-cyan);
+    }
+
+    .table-meta {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+
+    .progress-bar-container {
+      width: 100%;
+      height: 10px;
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 5px;
+      overflow: hidden;
+      margin: 1rem 0;
+    }
+
+    .progress-bar-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--primary-cyan), var(--accent-purple));
+      transition: width 0.3s ease;
+    }
+
+    .log-terminal {
+      background: #050811;
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 1rem;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.85rem;
+      color: #38edf8;
+      height: 300px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+    }
+
+    .log-entry {
+      margin-bottom: 0.35rem;
+    }
+    .log-entry.error { color: var(--error); }
+    .log-entry.success { color: var(--success); }
+    .log-entry.info { color: var(--primary-blue); }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="logo-area">
+        <h1>🚀 PostgreSQL 10.4 ➔ BigQuery</h1>
+        <p>Direct Docker Data Migration Engine & Schema Mapper</p>
+      </div>
+      <div class="status-badge">
+        <div class="dot"></div>
+        System Ready
+      </div>
+    </header>
+
+    <div class="grid-2">
+      <!-- Connection & Config Panel -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">⚙️ Konfigurasi Koneksi</div>
+          <button class="btn btn-secondary" onclick="testConnections()">Tes Koneksi</button>
+        </div>
+
+        <form id="configForm">
+          <h4 style="color: var(--primary-cyan); font-size: 0.85rem; margin-bottom: 0.75rem;">PostgreSQL 10.4 Source</h4>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Host</label>
+              <input type="text" id="pg_host" class="form-control" value="{{ config.pg_host }}">
+            </div>
+            <div class="form-group">
+              <label>Port</label>
+              <input type="number" id="pg_port" class="form-control" value="{{ config.pg_port }}">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>User</label>
+              <input type="text" id="pg_user" class="form-control" value="{{ config.pg_user }}">
+            </div>
+            <div class="form-group">
+              <label>Password</label>
+              <input type="password" id="pg_password" class="form-control" value="{{ config.pg_password }}">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Database</label>
+              <input type="text" id="pg_database" class="form-control" value="{{ config.pg_database }}">
+            </div>
+            <div class="form-group">
+              <label>Schema</label>
+              <input type="text" id="pg_schema" class="form-control" value="{{ config.pg_schema }}">
+            </div>
+          </div>
+
+          <h4 style="color: var(--accent-magenta); font-size: 0.85rem; margin: 1rem 0 0.75rem 0;">Google BigQuery Target</h4>
+          <div class="form-row">
+            <div class="form-group">
+              <label>GCP Project ID</label>
+              <input type="text" id="gcp_project_id" class="form-control" value="{{ config.gcp_project_id or '' }}">
+            </div>
+            <div class="form-group">
+              <label>Dataset ID</label>
+              <input type="text" id="bigquery_dataset_id" class="form-control" value="{{ config.bigquery_dataset_id or '' }}">
+            </div>
+          </div>
+
+          <div style="margin-top: 1rem; text-align: right;">
+            <button type="button" class="btn btn-secondary" onclick="saveConfig()">Simpan Konfigurasi</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Table Selection & Migration Runner -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">📦 Tabel Database PostgreSQL</div>
+          <button class="btn btn-secondary" onclick="loadTables()">Muat Tabel</button>
+        </div>
+
+        <div id="tableContainer" class="table-list">
+          <div style="text-align: center; padding: 2rem; color: var(--text-muted);">
+            Klik "Muat Tabel" untuk melihat daftar tabel di PostgreSQL.
+          </div>
+        </div>
+
+        <div style="margin-top: 1.5rem; display: flex; gap: 1rem;">
+          <button class="btn btn-secondary" onclick="startMigration(true)">Dry Run (Uji Skema)</button>
+          <button class="btn btn-primary" style="flex: 1;" onclick="startMigration(false)">⚡ Jalankan Migrasi</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Live Migration Progress & Console Log -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">📊 Live Migration Terminal & Progress</div>
+        <span id="progressText" style="font-size: 0.85rem; color: var(--text-muted);">Menunggu proses...</span>
+      </div>
+
+      <div class="progress-bar-container">
+        <div id="progressBar" class="progress-bar-fill"></div>
+      </div>
+
+      <div id="logTerminal" class="log-terminal">
+        <div class="log-entry info">[SYSTEM] Web Dashboard Siap. Hubungkan ke server...</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let ws;
+
+    function initWS() {
+      const loc = window.location;
+      const wsProtocol = loc.protocol === "https:" ? "wss:" : "ws:";
+      ws = new WebSocket(`${wsProtocol}//${loc.host}/ws/logs`);
+
+      ws.onmessage = (event) => {
+        const msg = JSON.parse(event.data);
+        handleWSMessage(msg);
+      };
+
+      ws.onclose = () => {
+        setTimeout(initWS, 2000);
+      };
+    }
+
+    function appendLog(text, type = 'info') {
+      const term = document.getElementById('logTerminal');
+      const div = document.createElement('div');
+      div.className = `log-entry ${type}`;
+      div.textContent = `[${new Date().toLocaleTimeString()}] ${text}`;
+      term.appendChild(div);
+      term.scrollTop = term.scrollHeight;
+    }
+
+    function handleWSMessage(msg) {
+      const evt = msg.event;
+      const data = msg.data;
+
+      if (evt === 'start') {
+        appendLog(`Memulai migrasi untuk ${data.total_tables} tabel. (Dry Run: ${data.dry_run})`, 'info');
+        document.getElementById('progressBar').style.width = '0%';
+      } else if (evt === 'table_start') {
+        appendLog(`Processing tabel: ${data.table_name} (${data.row_count} baris)...`, 'info');
+        document.getElementById('progressText').innerText = `Migrating ${data.table_name}...`;
+      } else if (evt === 'table_success') {
+        appendLog(`✓ Tabel ${data.table_name} sukses! ${data.postgres_rows} baris dimigrasi (${data.duration_seconds}s)`, 'success');
+      } else if (evt === 'table_error') {
+        appendLog(`✗ Tabel ${data.table_name} gagal: ${data.error}`, 'error');
+      } else if (evt === 'finish') {
+        appendLog(`🎉 Migrasi selesai! Total ${data.tables_processed} tabel, ${data.total_rows_migrated} baris dimigrasi dalam ${data.total_duration_seconds}s.`, 'success');
+        document.getElementById('progressBar').style.width = '100%';
+        document.getElementById('progressText').innerText = 'Migrasi Selesai';
+      }
+    }
+
+    async function testConnections() {
+      appendLog('Memeriksa koneksi PostgreSQL & BigQuery...', 'info');
+      try {
+        const res = await fetch('/api/test-connections');
+        const data = await res.json();
+
+        if (data.postgres.status === 'success') {
+          appendLog(`✓ PostgreSQL Terhubung! Versi: ${data.postgres.version}`, 'success');
+        } else {
+          appendLog(`✗ PostgreSQL Gagal: ${data.postgres.message}`, 'error');
+        }
+
+        if (data.bigquery.status === 'success') {
+          appendLog(`✓ BigQuery Terhubung! Project: ${data.bigquery.project_id}`, 'success');
+        } else {
+          appendLog(`✗ BigQuery Gagal: ${data.bigquery.message}`, 'error');
+        }
+      } catch (err) {
+        appendLog(`Error tes koneksi: ${err}`, 'error');
+      }
+    }
+
+    async function loadTables() {
+      appendLog('Mengambil daftar tabel dari PostgreSQL...', 'info');
+      try {
+        const res = await fetch('/api/tables');
+        const data = await res.json();
+
+        if (data.status === 'success') {
+          const container = document.getElementById('tableContainer');
+          container.innerHTML = '';
+          data.tables.forEach(t => {
+            container.innerHTML += `
+              <div class="table-item">
+                <div>
+                  <div class="table-name">${t.table_name}</div>
+                  <div class="table-meta">${t.column_count} kolom</div>
+                </div>
+                <div class="table-meta" style="font-weight: 600; color: var(--text-main);">${t.row_count.toLocaleString()} baris</div>
+              </div>
+            `;
+          });
+          appendLog(`Berhasil memuat ${data.tables.length} tabel.`, 'success');
+        } else {
+          appendLog(`Gagal memuat tabel: ${data.message}`, 'error');
+        }
+      } catch (err) {
+        appendLog(`Error load tables: ${err}`, 'error');
+      }
+    }
+
+    async function saveConfig() {
+      const payload = {
+        pg_host: document.getElementById('pg_host').value,
+        pg_port: parseInt(document.getElementById('pg_port').value),
+        pg_user: document.getElementById('pg_user').value,
+        pg_password: document.getElementById('pg_password').value,
+        pg_database: document.getElementById('pg_database').value,
+        pg_schema: document.getElementById('pg_schema').value,
+        gcp_project_id: document.getElementById('gcp_project_id').value,
+        bigquery_dataset_id: document.getElementById('bigquery_dataset_id').value
+      };
+
+      try {
+        const res = await fetch('/api/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        appendLog('✓ Konfigurasi tersimpan.', 'success');
+      } catch (err) {
+        appendLog(`Error simpan konfigurasi: ${err}`, 'error');
+      }
+    }
+
+    async function startMigration(dryRun = false) {
+      appendLog(`Memulai proses migrasi (Dry Run: ${dryRun})...`, 'info');
+      try {
+        const res = await fetch('/api/migrate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ dry_run: dryRun })
+        });
+        const data = await res.json();
+        appendLog(`Server response: ${data.message}`, 'info');
+      } catch (err) {
+        appendLog(`Error trigger migration: ${err}`, 'error');
+      }
+    }
+
+    window.onload = () => {
+      initWS();
+    };
+  </script>
+</body>
+</html>

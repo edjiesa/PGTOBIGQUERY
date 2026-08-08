@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+
+# Environment & Credentials
+.env
+*.json
+!package.json
+gcp-service-account.json
+credentials.json
+
+# Pytest & Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Temporary / Temp Parquet files
+*.parquet
+/temp_parquet/
+/tmp/
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
