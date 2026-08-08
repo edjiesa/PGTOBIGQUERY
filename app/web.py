@@ -3,6 +3,8 @@ import asyncio
 import logging
 from pathlib import Path
 from typing import List, Optional, Dict, Any
+from contextlib import asynccontextmanager
+
 
 from fastapi import FastAPI, Request, BackgroundTasks, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -16,13 +18,24 @@ from app.migrator import DatabaseMigrator
 
 logger = logging.getLogger("pgtobigquery.web")
 
+main_event_loop: Optional[asyncio.AbstractEventLoop] = None
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global main_event_loop
+    main_event_loop = asyncio.get_running_loop()
+    yield
+
+
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 web_app = FastAPI(
     title="PostgreSQL 10.4 to BigQuery Migration Tool",
     description="Web Dashboard for Database Migration to Google BigQuery",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 # Active WebSocket connections for live logs
@@ -119,6 +132,19 @@ async def update_config(data: ConfigUpdateModel):
 
 
 
+
+
+
+def safe_ws_broadcast(message: Dict[str, Any]):
+    """Thread-safe WebSocket broadcaster for background worker threads."""
+    try:
+        loop = main_event_loop or asyncio.get_event_loop()
+        if loop and loop.is_running():
+            asyncio.run_coroutine_threadsafe(broadcast_ws_message(message), loop)
+    except Exception as err:
+        logger.warning(f"WebSocket broadcast error: {err}")
+
+
 async_jobs: Dict[str, Dict[str, Any]] = {}
 
 
@@ -142,11 +168,10 @@ def test_postgres(background_tasks: BackgroundTasks):
             res = extractor.test_connection()
             extractor.close()
             async_jobs[job_id] = {"status": "completed", "result": res}
-            # Broadcast over WebSocket
-            asyncio.run(broadcast_ws_message({"type": "test_postgres_done", "data": res}))
+            safe_ws_broadcast({"type": "test_postgres_done", "data": res})
         except Exception as e:
             async_jobs[job_id] = {"status": "failed", "error": str(e)}
-            asyncio.run(broadcast_ws_message({"type": "test_postgres_error", "message": str(e)}))
+            safe_ws_broadcast({"type": "test_postgres_error", "message": str(e)})
 
     background_tasks.add_task(run_bg_test)
     return {"status": "started", "job_id": job_id, "message": "Diagnostic test started in background."}
@@ -194,14 +219,15 @@ def list_tables(background_tasks: BackgroundTasks):
             extractor.close()
             res = {"status": "success", "tables": tables}
             async_jobs[job_id] = {"status": "completed", "result": res}
-            asyncio.run(broadcast_ws_message({"type": "tables_loaded", "count": len(tables)}))
+            safe_ws_broadcast({"type": "tables_loaded", "count": len(tables)})
         except Exception as e:
             res = {"status": "error", "message": str(e)}
             async_jobs[job_id] = {"status": "failed", "result": res, "error": str(e)}
-            asyncio.run(broadcast_ws_message({"type": "tables_error", "message": str(e)}))
+            safe_ws_broadcast({"type": "tables_error", "message": str(e)})
 
     background_tasks.add_task(run_bg_tables)
     return {"status": "started", "job_id": job_id, "message": "Loading table catalog in background."}
+
 
 
 
@@ -258,7 +284,7 @@ def get_table_batches(background_tasks: BackgroundTasks, batch_size: int = 100):
                 "batches": batches
             }
             async_jobs[job_id] = {"status": "completed", "result": res}
-            asyncio.run(broadcast_ws_message({"type": "batches_created", "count": len(batches)}))
+            safe_ws_broadcast({"type": "batches_created", "count": len(batches)})
         except Exception as e:
             res = {"status": "error", "message": str(e)}
             async_jobs[job_id] = {"status": "failed", "result": res, "error": str(e)}
@@ -269,28 +295,31 @@ def get_table_batches(background_tasks: BackgroundTasks, batch_size: int = 100):
 
 
 @web_app.post("/api/migrate")
-
 async def start_migration(req: MigrationRequestModel, background_tasks: BackgroundTasks):
-    """Starts migration task in background."""
+    """Starts migration task in background using thread-safe event loop dispatch."""
     def run_bg_migration():
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-
-        migrator = DatabaseMigrator(config)
-
         def ws_callback(event):
-            loop.run_until_complete(broadcast_ws_message(event))
+            safe_ws_broadcast(event)
 
-        migrator.run_migration(
-            tables=req.tables,
-            exclude_tables=req.exclude_tables,
-            dry_run=req.dry_run,
-            progress_callback=ws_callback
-        )
-        loop.close()
+        try:
+            migrator = DatabaseMigrator(config)
+            migrator.run_migration(
+                tables=req.tables,
+                exclude_tables=req.exclude_tables,
+                dry_run=req.dry_run,
+                progress_callback=ws_callback
+            )
+        except Exception as e:
+            logger.error(f"Migration task error: {e}", exc_info=True)
+            safe_ws_broadcast({
+                "event": "table_error",
+                "data": {"table_name": "MIGRATION_JOB", "error": f"Background migration failed: {str(e)}"}
+            })
 
     background_tasks.add_task(run_bg_migration)
     return {"status": "started", "message": "Migration process started in background."}
+
+
 
 
 @web_app.websocket("/ws/logs")
