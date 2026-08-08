@@ -276,7 +276,7 @@ class PostgresExtractor:
                 except Exception:
                     pass
 
-        # Attempt 3: Ultimate Fallback - SELECT * FROM table LIMIT 0 (psycopg2 description + OID format)
+        # Attempt 3: Ultimate Fallback - SELECT * FROM table LIMIT 0 (psycopg2 description + bulk OID format)
         if not columns:
             try:
                 self.conn.rollback()
@@ -284,17 +284,29 @@ class PostgresExtractor:
                     cur.execute(f'SELECT * FROM "{target_schema}"."{table_name}" WHERE 1=0;')
                     if cur.description:
                         columns = []
+                        oids = [desc[1] for desc in cur.description if desc[1]]
+                        oid_type_map = {}
+                        if oids:
+                            try:
+                                self.conn.rollback()
+                                with self.conn.cursor() as oid_cur:
+                                    oid_cur.execute(
+                                        "SELECT oid, pg_catalog.format_type(oid, -1) FROM pg_type WHERE oid = ANY(%s);",
+                                        (oids,)
+                                    )
+                                    for r in oid_cur.fetchall():
+                                        oid_type_map[r[0]] = r[1]
+                            except Exception as oid_err:
+                                logger.warning(f"Could not map type OIDs for table '{table_name}': {oid_err}")
+                                try:
+                                    self.conn.rollback()
+                                except Exception:
+                                    pass
+
                         for idx, desc in enumerate(cur.description, start=1):
                             col_name = desc[0]
                             type_oid = desc[1]
-                            type_name = "varchar"
-                            try:
-                                cur.execute("SELECT format_type(%s, NULL);", (type_oid,))
-                                row = cur.fetchone()
-                                if row and row[0]:
-                                    type_name = row[0]
-                            except Exception:
-                                pass
+                            type_name = oid_type_map.get(type_oid, "varchar")
                             columns.append({
                                 "column_name": col_name,
                                 "data_type": type_name,
@@ -308,6 +320,7 @@ class PostgresExtractor:
                     self.conn.rollback()
                 except Exception:
                     pass
+
 
         result = []
         for col in columns:
