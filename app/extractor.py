@@ -14,7 +14,7 @@ class PostgresExtractor:
         self.conn = None
 
     def connect(self):
-        """Establishes database connection to PostgreSQL 10.4 (Remote or Local)."""
+        """Establishes database connection to PostgreSQL / EnterpriseDB 10.x (Remote or Local)."""
         if self.conn is None or self.conn.closed:
             self.conn = psycopg2.connect(
                 host=self.config.pg_host,
@@ -23,8 +23,7 @@ class PostgresExtractor:
                 password=self.config.pg_password,
                 dbname=self.config.pg_database,
                 sslmode=self.config.pg_sslmode,
-                connect_timeout=3,
-                options="-c statement_timeout=3000"
+                connect_timeout=5
             )
             logger.info(f"Connected to PostgreSQL at {self.config.pg_host}:{self.config.pg_port}/{self.config.pg_database} (sslmode={self.config.pg_sslmode})")
 
@@ -36,8 +35,8 @@ class PostgresExtractor:
 
     def test_connection(self) -> Dict[str, Any]:
         """
-        Performs Airbyte-style step-by-step connection diagnostics for PostgreSQL 10.4.
-        Fast fail-fast check in <3 seconds to avoid OpenResty 504 Gateway Time-outs.
+        Performs Airbyte-style step-by-step connection diagnostics for PostgreSQL / EnterpriseDB 10.x.
+        Each step is evaluated independently.
         """
         checklist = [
             {"step": "tcp_handshake", "name": "PostgreSQL Host Reachable", "status": "pending", "detail": ""},
@@ -46,7 +45,7 @@ class PostgresExtractor:
             {"step": "catalog_permission", "name": "Schema & Table Inspection", "status": "pending", "detail": ""}
         ]
 
-        # Step 1: Fast TCP Handshake Check (3s Timeout)
+        # Step 1: TCP Handshake Check (3s Timeout)
         try:
             sock = socket.create_connection((self.config.pg_host, self.config.pg_port), timeout=3.0)
             sock.close()
@@ -61,62 +60,82 @@ class PostgresExtractor:
                 "checklist": checklist
             }
 
-        # Step 2, 3 & 4: Authentication, Version, and Catalog Inspection (3s max)
+        # Step 2: Authentication Test
         try:
             self.connect()
+            with self.conn.cursor() as cur:
+                cur.execute("SELECT 1;")
             checklist[1]["status"] = "success"
             checklist[1]["detail"] = f"Authenticated as user '{self.config.pg_user}' on db '{self.config.pg_database}'"
+        except Exception as auth_err:
+            checklist[1]["status"] = "failed"
+            checklist[1]["detail"] = f"Authentication failed: {str(auth_err)}"
+            return {
+                "status": "failed",
+                "message": f"User Authentication failed: {str(auth_err)}",
+                "checklist": checklist
+            }
 
+        # Step 3: Version Check
+        try:
             with self.conn.cursor() as cur:
                 cur.execute("SELECT version();")
                 version = cur.fetchone()[0]
-                checklist[2]["status"] = "success"
-                checklist[2]["detail"] = f"{version.split(',')[0]}"
+            checklist[2]["status"] = "success"
+            checklist[2]["detail"] = f"{version.split(',')[0]}"
+        except Exception as ver_err:
+            checklist[2]["status"] = "warning"
+            checklist[2]["detail"] = f"Could not read version: {str(ver_err)}"
 
-                cur.execute("""
-                    SELECT COUNT(*)
-                    FROM information_schema.tables
-                    WHERE table_schema = %s AND table_type = 'BASE TABLE';
-                """, (self.config.pg_schema,))
-                cnt = cur.fetchone()[0]
-                checklist[3]["status"] = "success"
-                checklist[3]["detail"] = f"Schema '{self.config.pg_schema}' contains {cnt} base table(s)."
+        # Step 4: Catalog & Table Inspection (Fast pg_tables query)
+        table_count = 0
+        try:
+            with self.conn.cursor() as cur:
+                try:
+                    cur.execute("SELECT COUNT(*) FROM pg_tables WHERE schemaname = %s;", (self.config.pg_schema,))
+                    table_count = cur.fetchone()[0]
+                except Exception:
+                    self.conn.rollback()
+                    cur.execute("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = %s AND table_type = 'BASE TABLE';", (self.config.pg_schema,))
+                    table_count = cur.fetchone()[0]
 
-            return {
-                "status": "success",
-                "message": "PostgreSQL connection test succeeded!",
-                "database": self.config.pg_database,
-                "schema": self.config.pg_schema,
-                "table_count": cnt,
-                "checklist": checklist
-            }
-        except Exception as e:
-            checklist[1]["status"] = "failed"
-            checklist[1]["detail"] = f"Authentication/Connection Error: {str(e)}"
-            return {
-                "status": "failed",
-                "message": f"PostgreSQL connection failed: {str(e)}",
-                "checklist": checklist
-            }
+            checklist[3]["status"] = "success"
+            checklist[3]["detail"] = f"Schema '{self.config.pg_schema}' contains {table_count} base table(s)."
+        except Exception as cat_err:
+            checklist[3]["status"] = "warning"
+            checklist[3]["detail"] = f"Catalog query warning: {str(cat_err)}"
 
-
-
+        return {
+            "status": "success",
+            "message": "PostgreSQL connection test succeeded!",
+            "database": self.config.pg_database,
+            "schema": self.config.pg_schema,
+            "table_count": table_count,
+            "checklist": checklist
+        }
 
     def get_tables(self, schema: str = None) -> List[str]:
-        """Retrieves list of user base tables in the specified PostgreSQL schema."""
+        """Retrieves list of user base tables in the specified PostgreSQL / EnterpriseDB schema."""
         self.connect()
         target_schema = schema or self.config.pg_schema
-        query = """
-            SELECT table_name
-            FROM information_schema.tables
-            WHERE table_schema = %s
-              AND table_type = 'BASE TABLE'
-            ORDER BY table_name;
-        """
         with self.conn.cursor() as cur:
-            cur.execute(query, (target_schema,))
-            tables = [row[0] for row in cur.fetchall()]
+            try:
+                # Fast pg_tables query compatible with EnterpriseDB and Postgres
+                cur.execute("SELECT tablename FROM pg_tables WHERE schemaname = %s ORDER BY tablename;", (target_schema,))
+                tables = [row[0] for row in cur.fetchall()]
+            except Exception:
+                self.conn.rollback()
+                query = """
+                    SELECT table_name
+                    FROM information_schema.tables
+                    WHERE table_schema = %s
+                      AND table_type = 'BASE TABLE'
+                    ORDER BY table_name;
+                """
+                cur.execute(query, (target_schema,))
+                tables = [row[0] for row in cur.fetchall()]
         return tables
+
 
     def get_table_schema(self, table_name: str, schema: str = None) -> List[Dict[str, Any]]:
         """
