@@ -62,14 +62,14 @@ class DatabaseMigrator:
                 self.loader.ensure_dataset_exists()
 
             # 2. Get list of tables
-            all_tables = self.extractor.get_tables()
             if tables:
-                target_tables = [t for t in all_tables if t in tables]
+                target_tables = list(tables)
             else:
-                target_tables = all_tables
+                target_tables = self.extractor.get_tables()
 
             if exclude_tables:
                 target_tables = [t for t in target_tables if t not in exclude_tables]
+
 
             active_migration_status["is_running"] = True
             active_migration_status["total_tables"] = len(target_tables)
