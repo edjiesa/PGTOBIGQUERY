@@ -232,6 +232,26 @@ class BigQueryLoader:
         return output_file_path
 
 
+    def write_all_string_parquet(self, parquet_file_path: str, output_path: str) -> str:
+        """Reads existing Parquet file and re-writes all columns as string type."""
+        try:
+            original = pq.read_table(parquet_file_path)
+            str_arrays = {}
+            str_fields = []
+            for i, col_name in enumerate(original.schema.names):
+                arr = original.column(i)
+                # Cast every value to string safely
+                str_values = [str(v.as_py()) if v.is_valid else None for v in arr]
+                str_arrays[col_name] = pa.array(str_values, type=pa.string())
+                str_fields.append(pa.field(col_name, pa.string(), nullable=True))
+            str_schema = pa.schema(str_fields)
+            str_table = pa.Table.from_pydict(str_arrays, schema=str_schema)
+            pq.write_table(str_table, output_path, compression="SNAPPY")
+            return output_path
+        except Exception as e:
+            logger.error(f"Failed to re-write Parquet as all-string: {e}")
+            raise e
+
     def load_parquet_to_bigquery(
         self,
         parquet_file_path: str,
@@ -265,16 +285,20 @@ class BigQueryLoader:
             ]
         )
 
-        logger.info(f"Starting BigQuery Load Job for table '{clean_table_id}' ({len(bq_schema)} columns) from {parquet_file_path}...")
+        logger.info(f"Starting BigQuery Load Job for table '{clean_table_id}' ({len(bq_schema)} columns)...")
         try:
             with open(parquet_file_path, "rb") as source_file:
                 job = self.client.load_table_from_file(source_file, table_ref, job_config=job_config)
-            job.result()  # Wait for job completion
+            job.result()
             logger.info(f"BigQuery Load Job completed for table '{clean_table_id}'. Output rows: {job.output_rows}")
             return job.output_rows or 0
         except Exception as load_err:
-            logger.warning(f"Primary BigQuery load job failed for '{clean_table_id}' ({load_err}). Retrying with all-string schema fallback...")
+            logger.warning(f"Primary load failed for '{clean_table_id}': {load_err}. Retrying with all-string Parquet fallback...")
+
+            # Fallback: re-write Parquet as all strings, then load with all-STRING BigQuery schema
+            fallback_parquet = parquet_file_path + ".str_fallback.parquet"
             try:
+                self.write_all_string_parquet(parquet_file_path, fallback_parquet)
                 self.client.delete_table(table_ref, not_found_ok=True)
                 string_schema = [
                     bigquery.SchemaField(f.name, "STRING", mode="NULLABLE", description=f.description)
@@ -286,14 +310,19 @@ class BigQueryLoader:
                     write_disposition="WRITE_TRUNCATE",
                     autodetect=False
                 )
-                with open(parquet_file_path, "rb") as source_file:
+                with open(fallback_parquet, "rb") as source_file:
                     fallback_job = self.client.load_table_from_file(source_file, table_ref, job_config=fallback_job_config)
                 fallback_job.result()
-                logger.info(f"Fallback BigQuery Load Job completed for table '{clean_table_id}'. Output rows: {fallback_job.output_rows}")
+                logger.info(f"Fallback Load Job completed for '{clean_table_id}'. Output rows: {fallback_job.output_rows}")
                 return fallback_job.output_rows or 0
             except Exception as final_err:
-                logger.error(f"Both primary and fallback load jobs failed for table '{clean_table_id}': {final_err}")
+                logger.error(f"Both primary and fallback load jobs failed for '{clean_table_id}': {final_err}")
                 raise final_err
+            finally:
+                if os.path.exists(fallback_parquet):
+                    os.remove(fallback_parquet)
+
+
 
 
     def create_empty_table_if_not_exists(
