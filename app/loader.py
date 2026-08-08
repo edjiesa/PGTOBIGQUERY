@@ -158,7 +158,7 @@ class BigQueryLoader:
             return dataset
 
     def construct_bq_schema(self, pg_columns: List[Dict[str, Any]]) -> List[bigquery.SchemaField]:
-        """Converts PostgreSQL column schema list to BigQuery SchemaField list."""
+        """Converts PostgreSQL column schema list to BigQuery SchemaField list with fallback protection."""
         bq_fields = []
         for col in pg_columns:
             name = sanitize_bq_column_name(col["column_name"])
@@ -172,16 +172,25 @@ class BigQueryLoader:
                 description=f"Migrated from Postgres type: {pg_type}"
             )
             bq_fields.append(field)
+
+        if not bq_fields:
+            logger.warning("No columns found in pg_columns schema. Adding fallback 'id' STRING field.")
+            bq_fields.append(bigquery.SchemaField("id", "STRING", mode="NULLABLE", description="Fallback schema column"))
+
         return bq_fields
 
     def construct_pyarrow_schema(self, pg_columns: List[Dict[str, Any]]) -> pa.Schema:
-        """Constructs PyArrow Schema for batch writing."""
+        """Constructs PyArrow Schema for batch writing with fallback protection."""
         pa_fields = []
         for col in pg_columns:
             name = sanitize_bq_column_name(col["column_name"])
             pg_type = col["pg_type"]
             is_nullable = col.get("is_nullable", True)
             pa_fields.append(postgres_to_pyarrow_field(name, pg_type, is_nullable))
+
+        if not pa_fields:
+            pa_fields.append(pa.field("id", pa.string(), nullable=True))
+
         return pa.schema(pa_fields)
 
     def write_batch_to_parquet(
@@ -191,6 +200,13 @@ class BigQueryLoader:
         output_file_path: str
     ) -> str:
         """Converts batch of dict rows to PyArrow table and writes to Parquet file."""
+        if not pg_columns and batch_rows:
+            logger.info("Auto-discovering columns directly from batch row keys...")
+            pg_columns = [
+                {"column_name": k, "pg_type": "varchar", "is_nullable": True}
+                for k in batch_rows[0].keys()
+            ]
+
         # 1. Build PyArrow Schema
         pa_schema = self.construct_pyarrow_schema(pg_columns)
 
@@ -212,6 +228,7 @@ class BigQueryLoader:
         pa_table = pa.Table.from_pydict(col_data, schema=pa_schema)
         pq.write_table(pa_table, output_file_path, compression="SNAPPY")
         return output_file_path
+
 
     def load_parquet_to_bigquery(
         self,
