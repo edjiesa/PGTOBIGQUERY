@@ -211,13 +211,39 @@ class PostgresExtractor:
         return tables
 
 
+    def find_schema_for_table(self, table_name: str) -> str:
+        """Finds the actual schema containing table_name across PostgreSQL namespaces."""
+        self.connect()
+        try:
+            self.conn.rollback()
+            with self.conn.cursor() as cur:
+                cur.execute("""
+                    SELECT n.nspname
+                    FROM pg_class c
+                    JOIN pg_namespace n ON n.oid = c.relnamespace
+                    WHERE LOWER(c.relname) = LOWER(%s)
+                      AND n.nspname NOT LIKE 'pg_%%'
+                      AND n.nspname != 'information_schema'
+                    LIMIT 1;
+                """, (table_name,))
+                row = cur.fetchone()
+                if row and row[0]:
+                    return row[0]
+        except Exception:
+            try:
+                self.conn.rollback()
+            except Exception:
+                pass
+        return self.config.pg_schema
+
     def get_table_schema(self, table_name: str, schema: str = None) -> List[Dict[str, Any]]:
         """
         Extracts ALL column definitions, PostgreSQL data types, and nullability for a table.
         Queries pg_attribute catalog directly with clean transaction rollbacks & OID resolution.
         """
         self.connect()
-        target_schema = schema or self.config.pg_schema
+        target_schema = schema or self.find_schema_for_table(table_name)
+
 
         columns = []
 
@@ -359,7 +385,7 @@ class PostgresExtractor:
     def get_real_table_name(self, table_name: str, schema: str = None) -> str:
         """Resolves exact case-sensitive relation name from PostgreSQL pg_class."""
         self.connect()
-        target_schema = schema or self.config.pg_schema
+        target_schema = schema or self.find_schema_for_table(table_name)
         try:
             self.conn.rollback()
             with self.conn.cursor() as cur:
@@ -382,7 +408,7 @@ class PostgresExtractor:
     def get_row_count(self, table_name: str, schema: str = None) -> int:
         """Gets exact total row count for a table with multi-query fallback."""
         self.connect()
-        target_schema = schema or self.config.pg_schema
+        target_schema = schema or self.find_schema_for_table(table_name)
         real_name = self.get_real_table_name(table_name, target_schema)
 
         queries = [
@@ -408,7 +434,8 @@ class PostgresExtractor:
         Yields list of dict rows for each batch.
         """
         self.connect()
-        target_schema = schema or self.config.pg_schema
+        target_schema = schema or self.find_schema_for_table(table_name)
+
         real_name = self.get_real_table_name(table_name, target_schema)
         cursor_name = f"stream_{target_schema}_{table_name}".replace("-", "_").replace(".", "_")
 
