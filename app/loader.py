@@ -219,18 +219,32 @@ class BigQueryLoader:
         bq_schema: List[bigquery.SchemaField],
         write_disposition: str = "WRITE_TRUNCATE"
     ) -> int:
-        """Loads a local Parquet file into a BigQuery table using BigQuery Load Job."""
+        """Loads a local Parquet file into a BigQuery table using BigQuery Load Job with auto-schema update."""
         dataset_id = self.config.bigquery_dataset_id
         table_ref = f"{self.client.project}.{dataset_id}.{table_id}"
+
+        # Check existing table schema in BigQuery
+        try:
+            existing_table = self.client.get_table(table_ref)
+            # If existing BigQuery table has fewer columns than PostgreSQL bq_schema or write_disposition is WRITE_TRUNCATE, recreate table schema
+            if len(existing_table.schema) < len(bq_schema) and write_disposition == "WRITE_TRUNCATE":
+                logger.info(f"Recreating BigQuery table '{table_id}' to expand schema from {len(existing_table.schema)} to {len(bq_schema)} columns...")
+                self.client.delete_table(table_ref, not_found_ok=True)
+        except Exception:
+            pass
 
         job_config = bigquery.LoadJobConfig(
             schema=bq_schema,
             source_format=bigquery.SourceFormat.PARQUET,
             write_disposition=write_disposition,
-            autodetect=False
+            autodetect=False,
+            schema_update_options=[
+                bigquery.SchemaUpdateOption.ALLOW_FIELD_ADDITION,
+                bigquery.SchemaUpdateOption.ALLOW_FIELD_RELAXATION
+            ]
         )
 
-        logger.info(f"Starting BigQuery Load Job for table '{table_id}' from {parquet_file_path}...")
+        logger.info(f"Starting BigQuery Load Job for table '{table_id}' ({len(bq_schema)} columns) from {parquet_file_path}...")
         with open(parquet_file_path, "rb") as source_file:
             job = self.client.load_table_from_file(source_file, table_ref, job_config=job_config)
 
@@ -243,20 +257,27 @@ class BigQueryLoader:
         table_id: str,
         bq_schema: List[bigquery.SchemaField]
     ) -> bigquery.Table:
-        """Creates an empty table with specified schema in BigQuery if it does not exist."""
+        """Creates an empty table with specified schema in BigQuery if it does not exist (or updates schema if outdated)."""
         dataset_id = self.config.bigquery_dataset_id
         table_ref = f"{self.client.project}.{dataset_id}.{table_id}"
 
         try:
             table = self.client.get_table(table_ref)
-            logger.info(f"BigQuery table '{table_id}' already exists.")
+            if len(table.schema) < len(bq_schema):
+                logger.info(f"Recreating outdated BigQuery empty table '{table_id}' ({len(table.schema)} -> {len(bq_schema)} columns)...")
+                self.client.delete_table(table_ref, not_found_ok=True)
+                table = bigquery.Table(table_ref, schema=bq_schema)
+                table = self.client.create_table(table, exists_ok=True)
+            else:
+                logger.info(f"BigQuery table '{table_id}' already exists with {len(table.schema)} columns.")
             return table
         except Exception:
-            logger.info(f"Creating empty BigQuery table '{table_id}' with schema...")
+            logger.info(f"Creating empty BigQuery table '{table_id}' with {len(bq_schema)} columns...")
             table = bigquery.Table(table_ref, schema=bq_schema)
             table = self.client.create_table(table, exists_ok=True)
             logger.info(f"Successfully created empty BigQuery table '{table_id}'.")
             return table
+
 
     def get_table_row_count(self, table_id: str) -> int:
         """Gets actual row count of a table directly from BigQuery metadata/query."""
