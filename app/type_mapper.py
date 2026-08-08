@@ -22,7 +22,23 @@ def sanitize_bq_column_name(name: str) -> str:
 
 
 
+def sanitize_bq_table_id(table_name: str) -> str:
+    """
+    Sanitizes PostgreSQL table names to comply with BigQuery table ID naming rules:
+    - Must contain only letters (a-z, A-Z), numbers (0-9), or underscores (_)
+    - Cannot start with a digit
+    - Max 1024 characters
+    """
+    if not table_name:
+        return "unnamed_table"
+    clean = re.sub(r'[^a-zA-Z0-9_]', '_', str(table_name).strip())
+    if clean and clean[0].isdigit():
+        clean = f"tbl_{clean}"
+    return clean[:1024] or "unnamed_table"
+
+
 def postgres_to_bigquery_type(pg_type: str) -> Tuple[str, str]:
+
     """
     Maps PostgreSQL 10.4 data type string to (BigQuery Type, Mode).
     Returns (bq_type, mode) e.g., ("INT64", "NULLABLE") or ("STRING", "REPEATED").

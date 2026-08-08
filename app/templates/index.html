@@ -1241,40 +1241,38 @@
       updateSingleTableRowStatus(tableName, 'RUNNING', '⏳ Proses migrasi ke BigQuery...');
 
       try {
-        const res = await safeFetchJson('/api/migrate', {
+        const res = await safeFetchJson('/api/migrate-single', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ tables: [tableName], dry_run: false })
         });
 
         if (!res.ok) {
-          appendLog(`✗ Error sync tabel '${tableName}': ${res.data.message}`, 'error');
-          updateSingleTableRowStatus(tableName, 'FAILED', `✗ Gagal: ${res.data.message}`);
+          const errMsg = res.data && res.data.detail ? res.data.detail : (res.data && res.data.error ? res.data.error : 'HTTP error');
+          appendLog(`✗ Error sync tabel '${tableName}': ${errMsg}`, 'error');
+          updateSingleTableRowStatus(tableName, 'FAILED', `✗ Gagal: ${errMsg}`);
           return;
         }
 
-        // Poll progress until this table is verified completed
-        let attempts = 0;
-        while (attempts < 60) {
-          await new Promise(r => setTimeout(r, 1000));
-          attempts++;
-          const progRes = await safeFetchJson('/api/migration-progress');
-          if (progRes.ok && progRes.data && progRes.data.progress) {
-            const p = progRes.data.progress;
-            if (p.last_completed_table === tableName || (!p.is_running && p.tables_processed > 0)) {
-              const rows = p.last_completed_rows || 0;
-              appendLog(`🎉 [SELESAI DIBENTUK & TERISI] Tabel BigQuery '${tableName}' -> ${rows.toLocaleString()} baris data SUKSES TERVERIFIKASI TERMUAT!`, 'success');
-              updateSingleTableRowStatus(tableName, 'SUCCESS', `✓ ${rows.toLocaleString()} baris in BigQuery`);
-              savePersistentState();
-              return;
-            }
-          }
+        const data = res.data;
+        if (data.status === 'failed' || data.error) {
+          appendLog(`✗ [ERROR MIGRASI TABEL] '${tableName}' GAGAL: ${data.error}`, 'error');
+          updateSingleTableRowStatus(tableName, 'FAILED', `✗ Gagal: ${data.error}`);
+          savePersistentState();
+          return;
         }
+
+        const rows = data.bigquery_rows || 0;
+        appendLog(`🎉 [SELESAI DIBENTUK & TERISI] Tabel BigQuery '${tableName}' -> ${rows.toLocaleString()} baris data SUKSES TERVERIFIKASI TERMUAT!`, 'success');
+        updateSingleTableRowStatus(tableName, 'SUCCESS', `✓ ${rows.toLocaleString()} baris in BigQuery`);
+        savePersistentState();
+
       } catch (err) {
         appendLog(`✗ Failed sync tabel '${tableName}': ${err}`, 'error');
         updateSingleTableRowStatus(tableName, 'FAILED', `✗ Gagal: ${err}`);
       }
     }
+
 
 
 

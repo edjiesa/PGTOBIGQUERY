@@ -14,6 +14,8 @@ from app.type_mapper import (
     postgres_to_bigquery_type,
     postgres_to_pyarrow_field,
     convert_value_for_pyarrow,
+    sanitize_bq_column_name,
+    sanitize_bq_table_id,
 )
 
 logger = logging.getLogger("pgtobigquery.loader")
@@ -239,14 +241,15 @@ class BigQueryLoader:
     ) -> int:
         """Loads a local Parquet file into a BigQuery table using BigQuery Load Job with auto-schema update."""
         dataset_id = self.config.bigquery_dataset_id
-        table_ref = f"{self.client.project}.{dataset_id}.{table_id}"
+        clean_table_id = sanitize_bq_table_id(table_id)
+        table_ref = f"{self.client.project}.{dataset_id}.{clean_table_id}"
 
         # Check existing table schema in BigQuery
         try:
             existing_table = self.client.get_table(table_ref)
             # If existing BigQuery table has fewer columns than PostgreSQL bq_schema or write_disposition is WRITE_TRUNCATE, recreate table schema
             if len(existing_table.schema) < len(bq_schema) and write_disposition == "WRITE_TRUNCATE":
-                logger.info(f"Recreating BigQuery table '{table_id}' to expand schema from {len(existing_table.schema)} to {len(bq_schema)} columns...")
+                logger.info(f"Recreating BigQuery table '{clean_table_id}' to expand schema from {len(existing_table.schema)} to {len(bq_schema)} columns...")
                 self.client.delete_table(table_ref, not_found_ok=True)
         except Exception:
             pass
@@ -262,15 +265,15 @@ class BigQueryLoader:
             ]
         )
 
-        logger.info(f"Starting BigQuery Load Job for table '{table_id}' ({len(bq_schema)} columns) from {parquet_file_path}...")
+        logger.info(f"Starting BigQuery Load Job for table '{clean_table_id}' ({len(bq_schema)} columns) from {parquet_file_path}...")
         try:
             with open(parquet_file_path, "rb") as source_file:
                 job = self.client.load_table_from_file(source_file, table_ref, job_config=job_config)
             job.result()  # Wait for job completion
-            logger.info(f"BigQuery Load Job completed for table '{table_id}'. Output rows: {job.output_rows}")
+            logger.info(f"BigQuery Load Job completed for table '{clean_table_id}'. Output rows: {job.output_rows}")
             return job.output_rows or 0
         except Exception as load_err:
-            logger.warning(f"Primary BigQuery load job failed for '{table_id}' ({load_err}). Retrying with all-string schema fallback...")
+            logger.warning(f"Primary BigQuery load job failed for '{clean_table_id}' ({load_err}). Retrying with all-string schema fallback...")
             try:
                 self.client.delete_table(table_ref, not_found_ok=True)
                 string_schema = [
@@ -286,10 +289,10 @@ class BigQueryLoader:
                 with open(parquet_file_path, "rb") as source_file:
                     fallback_job = self.client.load_table_from_file(source_file, table_ref, job_config=fallback_job_config)
                 fallback_job.result()
-                logger.info(f"Fallback BigQuery Load Job completed for table '{table_id}'. Output rows: {fallback_job.output_rows}")
+                logger.info(f"Fallback BigQuery Load Job completed for table '{clean_table_id}'. Output rows: {fallback_job.output_rows}")
                 return fallback_job.output_rows or 0
             except Exception as final_err:
-                logger.error(f"Both primary and fallback load jobs failed for table '{table_id}': {final_err}")
+                logger.error(f"Both primary and fallback load jobs failed for table '{clean_table_id}': {final_err}")
                 raise final_err
 
 
@@ -300,34 +303,37 @@ class BigQueryLoader:
     ) -> bigquery.Table:
         """Creates an empty table with specified schema in BigQuery if it does not exist (or updates schema if outdated)."""
         dataset_id = self.config.bigquery_dataset_id
-        table_ref = f"{self.client.project}.{dataset_id}.{table_id}"
+        clean_table_id = sanitize_bq_table_id(table_id)
+        table_ref = f"{self.client.project}.{dataset_id}.{clean_table_id}"
 
         try:
             table = self.client.get_table(table_ref)
             if len(table.schema) < len(bq_schema):
-                logger.info(f"Recreating outdated BigQuery empty table '{table_id}' ({len(table.schema)} -> {len(bq_schema)} columns)...")
+                logger.info(f"Recreating outdated BigQuery empty table '{clean_table_id}' ({len(table.schema)} -> {len(bq_schema)} columns)...")
                 self.client.delete_table(table_ref, not_found_ok=True)
                 table = bigquery.Table(table_ref, schema=bq_schema)
                 table = self.client.create_table(table, exists_ok=True)
             else:
-                logger.info(f"BigQuery table '{table_id}' already exists with {len(table.schema)} columns.")
+                logger.info(f"BigQuery table '{clean_table_id}' already exists with {len(table.schema)} columns.")
             return table
         except Exception:
-            logger.info(f"Creating empty BigQuery table '{table_id}' with {len(bq_schema)} columns...")
+            logger.info(f"Creating empty BigQuery table '{clean_table_id}' with {len(bq_schema)} columns...")
             table = bigquery.Table(table_ref, schema=bq_schema)
             table = self.client.create_table(table, exists_ok=True)
-            logger.info(f"Successfully created empty BigQuery table '{table_id}'.")
+            logger.info(f"Successfully created empty BigQuery table '{clean_table_id}'.")
             return table
 
 
     def get_table_row_count(self, table_id: str) -> int:
         """Gets actual row count of a table directly from BigQuery metadata/query."""
         dataset_id = self.config.bigquery_dataset_id
-        table_ref = f"{self.client.project}.{dataset_id}.{table_id}"
+        clean_table_id = sanitize_bq_table_id(table_id)
+        table_ref = f"{self.client.project}.{dataset_id}.{clean_table_id}"
         try:
             table = self.client.get_table(table_ref)
             return table.num_rows or 0
         except Exception as e:
-            logger.warning(f"Could not fetch BigQuery row count for '{table_id}': {e}")
+            logger.warning(f"Could not fetch BigQuery row count for '{clean_table_id}': {e}")
             return 0
+
 

@@ -347,7 +347,47 @@ async def start_migration(req: MigrationRequestModel, background_tasks: Backgrou
 
 
 
+@web_app.post("/api/migrate-single")
+def migrate_single_table(req: MigrationRequestModel):
+
+    """Synchronously migrates a single target table and returns detailed status/errors immediately."""
+    if not req.tables or len(req.tables) == 0:
+        raise HTTPException(status_code=400, detail="No table specified for single table migration.")
+
+    table_name = req.tables[0]
+    config = get_runtime_config()
+    migrator = DatabaseMigrator(config)
+
+    try:
+        results = migrator.run_migration(tables=[table_name], dry_run=req.dry_run)
+        if results.get("errors") and len(results["errors"]) > 0:
+            err_msg = results["errors"][0].get("error", "Unknown migration error")
+            return {
+                "status": "failed",
+                "table_name": table_name,
+                "error": err_msg,
+                "results": results
+            }
+
+        table_details = results.get("table_details", [])
+        bq_rows = table_details[0].get("bigquery_rows", 0) if table_details else 0
+        return {
+            "status": "success",
+            "table_name": table_name,
+            "bigquery_rows": bq_rows,
+            "results": results
+        }
+    except Exception as e:
+        logger.error(f"Single table migration endpoint error for '{table_name}': {e}", exc_info=True)
+        return {
+            "status": "failed",
+            "table_name": table_name,
+            "error": str(e)
+        }
+
+
 @web_app.get("/api/migration-progress")
+
 def get_migration_progress():
     """Returns real-time migration progress metrics for HTTP polling fallbacks."""
     cached_stats = state_manager.load_stats()
