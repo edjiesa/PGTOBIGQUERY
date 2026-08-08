@@ -213,49 +213,113 @@ class PostgresExtractor:
 
     def get_table_schema(self, table_name: str, schema: str = None) -> List[Dict[str, Any]]:
         """
-        Extracts column definitions, PostgreSQL data types, and nullability for a table.
-        Querying catalog views compatible with PostgreSQL 10.4.
+        Extracts ALL column definitions, PostgreSQL data types, and nullability for a table.
+        Queries pg_attribute catalog directly (EnterpriseDB Advanced Server & PostgreSQL compatible).
         """
         self.connect()
         target_schema = schema or self.config.pg_schema
-        query = """
+
+        # Query 1: Direct PostgreSQL system catalog (pg_attribute) - EDB & Postgres compatible
+        query_pg_catalog = """
             SELECT 
-                column_name,
-                data_type,
-                udt_name,
-                is_nullable,
-                ordinal_position
-            FROM information_schema.columns
-            WHERE table_schema = %s AND table_name = %s
-            ORDER BY ordinal_position;
+                a.attname AS column_name,
+                format_type(a.atttypid, a.atttypmod) AS data_type,
+                t.typname AS udt_name,
+                NOT a.attnotnull AS is_nullable,
+                a.attnum AS ordinal_position
+            FROM pg_attribute a
+            JOIN pg_class c ON c.oid = a.attrelid
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            JOIN pg_type t ON t.oid = a.atttypid
+            WHERE n.nspname = %s 
+              AND LOWER(c.relname) = LOWER(%s)
+              AND a.attnum > 0 
+              AND NOT a.attisdropped
+            ORDER BY a.attnum;
         """
+        columns = []
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(query, (target_schema, table_name))
-            columns = cur.fetchall()
+            try:
+                cur.execute(query_pg_catalog, (target_schema, table_name))
+                columns = cur.fetchall()
+            except Exception as e:
+                logger.warning(f"pg_attribute query failed ({e}), trying information_schema")
+                self.conn.rollback()
+
+            # Query 2 Fallback: information_schema.columns (case-insensitive)
+            if not columns:
+                try:
+                    query_inf_schema = """
+                        SELECT 
+                            column_name,
+                            data_type,
+                            udt_name,
+                            is_nullable,
+                            ordinal_position
+                        FROM information_schema.columns
+                        WHERE table_schema = %s AND LOWER(table_name) = LOWER(%s)
+                        ORDER BY ordinal_position;
+                    """
+                    cur.execute(query_inf_schema, (target_schema, table_name))
+                    columns = cur.fetchall()
+                except Exception as e:
+                    logger.warning(f"information_schema query failed ({e})")
+                    self.conn.rollback()
+
+            # Query 3 Ultimate Fallback: SELECT * LIMIT 0 description
+            if not columns:
+                try:
+                    cur.execute(f'SELECT * FROM "{target_schema}"."{table_name}" WHERE 1=0;')
+                    if cur.description:
+                        columns = [
+                            {
+                                "column_name": desc[0],
+                                "data_type": "text",
+                                "udt_name": "text",
+                                "is_nullable": "YES",
+                                "ordinal_position": idx + 1
+                            }
+                            for idx, desc in enumerate(cur.description)
+                        ]
+                except Exception as desc_err:
+                    logger.error(f"Fallback SELECT * failed for table {table_name}: {desc_err}")
+                    self.conn.rollback()
 
         result = []
         for col in columns:
             col_name = col["column_name"]
-            data_type = col["data_type"]
-            udt_name = col["udt_name"]
-            is_nullable = col["is_nullable"].upper() == "YES"
+            data_type = str(col["data_type"])
+            udt_name = str(col["udt_name"])
+            is_null = col.get("is_nullable")
+            is_nullable = is_null if isinstance(is_null, bool) else (str(is_null).upper() in ("YES", "TRUE", "1"))
 
-            # Check if it's an ARRAY type or user-defined udt
-            if data_type == "ARRAY":
-                pg_type = f"{udt_name}[]"
-            elif data_type == "USER-DEFINED":
+            # Normalize data type format_type output (e.g. character varying(255) -> varchar)
+            clean_type = data_type.lower()
+            if "character varying" in clean_type or "varchar" in clean_type:
+                pg_type = "varchar"
+            elif "timestamp" in clean_type:
+                pg_type = "timestamp"
+            elif "numeric" in clean_type or "decimal" in clean_type:
+                pg_type = "numeric"
+            elif "integer" in clean_type or "bigint" in clean_type or "smallint" in clean_type:
+                pg_type = clean_type.split("(")[0]
+            elif clean_type == "array" or udt_name.startswith("_"):
+                pg_type = f"{udt_name.lstrip('_')}[]"
+            elif clean_type == "user-defined":
                 pg_type = udt_name
             else:
-                pg_type = data_type
+                pg_type = clean_type.split("(")[0]
 
             result.append({
                 "column_name": col_name,
                 "pg_type": pg_type,
                 "is_nullable": is_nullable,
-                "position": col["ordinal_position"]
+                "position": col.get("ordinal_position", len(result) + 1)
             })
 
+        logger.info(f"Extracted {len(result)} columns for table '{table_name}'")
         return result
+
 
     def get_row_count(self, table_name: str, schema: str = None) -> int:
         """Gets exact total row count for a table."""
