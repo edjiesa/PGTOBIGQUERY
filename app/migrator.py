@@ -9,6 +9,7 @@ from app.config import MigrationConfig
 from app.extractor import PostgresExtractor
 from app.loader import BigQueryLoader
 from app.type_mapper import postgres_to_bigquery_type, sanitize_bq_table_id
+from app.state import state_manager
 
 logger = logging.getLogger("pgtobigquery.migrator")
 
@@ -37,12 +38,15 @@ def _update_status(**kwargs):
     with _status_lock:
         for k, v in kwargs.items():
             active_migration_status[k] = v
+    # Persist to disk so any browser can read it
+    state_manager.save_migration_status(active_migration_status)
 
 
 def _increment_status(field: str, amount: int = 1):
     """Thread-safe increment of a numeric field in active_migration_status."""
     with _status_lock:
         active_migration_status[field] = active_migration_status.get(field, 0) + amount
+    state_manager.save_migration_status(active_migration_status)
 
 
 class DatabaseMigrator:

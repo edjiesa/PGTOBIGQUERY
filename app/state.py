@@ -18,6 +18,7 @@ class StateManager:
         self.batches_file = self.data_dir / "batches.json"
         self.profiles_file = self.data_dir / "profiles.json"
         self.stats_file = self.data_dir / "stats.json"
+        self.migration_status_file = self.data_dir / "migration_status.json"
 
     def save_tables(self, tables: List[Dict[str, Any]]) -> bool:
         """Saves raw table metadata to persistent disk storage."""
@@ -110,6 +111,36 @@ class StateManager:
         except Exception as e:
             logger.error(f"Error loading stats from persistent storage: {e}")
             return {"total_tables": 0, "tables_processed": 0, "total_rows_migrated": 0}
+
+
+    def save_migration_status(self, status: Dict[str, Any]) -> bool:
+        """Saves full migration progress status to persistent disk so any browser can read it."""
+        try:
+            with open(self.migration_status_file, "w", encoding="utf-8") as f:
+                json.dump(status, f, indent=2, default=str)
+            return True
+        except Exception as e:
+            logger.error(f"Error saving migration status: {e}")
+            return False
+
+    def load_migration_status(self) -> Dict[str, Any]:
+        """Loads last persisted migration progress status from disk."""
+        if not self.migration_status_file.exists():
+            return {"is_running": False, "tables_processed": 0, "total_tables": 0}
+        try:
+            with open(self.migration_status_file, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            logger.error(f"Error loading migration status: {e}")
+            return {"is_running": False, "tables_processed": 0, "total_tables": 0}
+
+    def clear_migration_status(self):
+        """Clears persisted migration status on new migration start."""
+        try:
+            if self.migration_status_file.exists():
+                self.migration_status_file.unlink()
+        except Exception:
+            pass
 
 
 # Singleton instance

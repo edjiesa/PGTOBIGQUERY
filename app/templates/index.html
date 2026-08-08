@@ -561,14 +561,87 @@
 
   <script>
     let ws;
+    let bgPollInterval = null;
 
     function initWS() {
       const loc = window.location;
       const wsProtocol = loc.protocol === "https:" ? "wss:" : "ws:";
       ws = new WebSocket(`${wsProtocol}//${loc.host}/ws/logs`);
       ws.onmessage = (e) => handleWSMessage(JSON.parse(e.data));
-      ws.onclose = () => setTimeout(initWS, 2000);
+      ws.onclose = () => setTimeout(initWS, 3000);
     }
+
+    // On page load: check if migration is already running on server (from any browser)
+    async function checkServerMigrationStatus() {
+      try {
+        const res = await fetch('/api/migration-running');
+        const data = await res.json();
+        if (data.is_running && data.progress) {
+          const p = data.progress;
+          showBgMigrationBanner(p);
+          startBgPolling();
+        }
+      } catch (e) {}
+    }
+
+    function showBgMigrationBanner(progress) {
+      let banner = document.getElementById('bgMigrationBanner');
+      if (!banner) {
+        banner = document.createElement('div');
+        banner.id = 'bgMigrationBanner';
+        banner.style.cssText = `
+          position: fixed; top: 0; left: 0; right: 0; z-index: 9999;
+          background: linear-gradient(90deg, #7c3aed, #2563eb);
+          color: white; padding: 10px 20px;
+          display: flex; align-items: center; justify-content: space-between;
+          font-size: 0.9rem; font-weight: 600; box-shadow: 0 2px 12px rgba(0,0,0,0.4);
+        `;
+        document.body.prepend(banner);
+      }
+      const processed = progress.tables_processed || 0;
+      const total = progress.total_tables || 0;
+      const pct = total > 0 ? Math.round((processed / total) * 100) : 0;
+      const current = progress.current_table_name || '-';
+      banner.innerHTML = `
+        <span>🔄 Migrasi Berjalan di Server: ${processed}/${total} tabel (${pct}%) — Tabel Aktif: <strong>${current}</strong></span>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <span style="font-weight:400;opacity:0.85;">Aman menutup browser — proses tetap berjalan di server</span>
+          <button onclick="stopMigration()" style="background:rgba(255,255,255,0.2);border:1px solid rgba(255,255,255,0.4);color:white;padding:4px 10px;border-radius:6px;cursor:pointer;font-size:0.8rem;">⏹ Stop</button>
+        </div>
+      `;
+    }
+
+    function hideBgMigrationBanner() {
+      const banner = document.getElementById('bgMigrationBanner');
+      if (banner) banner.remove();
+      stopBgPolling();
+    }
+
+    function startBgPolling() {
+      if (bgPollInterval) return;
+      bgPollInterval = setInterval(async () => {
+        try {
+          const res = await fetch('/api/migration-running');
+          const data = await res.json();
+          if (data.is_running && data.progress) {
+            showBgMigrationBanner(data.progress);
+          } else {
+            hideBgMigrationBanner();
+          }
+        } catch (e) {}
+      }, 3000);
+    }
+
+    function stopBgPolling() {
+      if (bgPollInterval) { clearInterval(bgPollInterval); bgPollInterval = null; }
+    }
+
+    async function stopMigration() {
+      if (!confirm('Stop migrasi? Proses yang sedang berjalan akan selesai dulu baru berhenti.')) return;
+      await fetch('/api/migration-stop', { method: 'POST' });
+      appendLog('⏹ Stop signal dikirim ke server. Migrasi akan berhenti setelah tabel aktif selesai.', 'info');
+    }
+
 
     function appendLog(text, type = 'info') {
       const term = document.getElementById('logTerminal');
@@ -671,12 +744,16 @@
             }
           }
         });
-      } else if (evt === 'finish') {
-        appendLog(`🎉 [KELOMPOK MIGRASI SELESAI] Total ${data.tables_processed} tabel & ${(data.total_rows_migrated || 0).toLocaleString()} BARIS SUKSES DIMIGRASIKAN KE BIGQUERY dalam ${data.total_duration_seconds}s!`, 'success');
+      } else if (evt === 'finish' || evt === 'migration_finished') {
+        appendLog(`🎉 [KELOMPOK MIGRASI SELESAI] Total ${data.tables_processed || ''} tabel & ${(data.total_rows_migrated || 0).toLocaleString()} BARIS SUKSES DIMIGRASIKAN KE BIGQUERY dalam ${data.total_duration_seconds || 0}s!`, 'success');
         document.getElementById('progressBar').style.width = '100%';
         document.getElementById('progressText').innerText = `Migrasi Selesai (Total ${(data.total_rows_migrated || 0).toLocaleString()} baris in BigQuery)`;
-        document.getElementById('statTablesProcessed').innerText = `${data.tables_processed} / ${data.tables_processed}`;
-        document.getElementById('statRowsMigrated').innerText = `${(data.total_rows_migrated || 0).toLocaleString()} baris`;
+        if (data.tables_processed) {
+          document.getElementById('statTablesProcessed').innerText = `${data.tables_processed} / ${data.tables_processed}`;
+          document.getElementById('statRowsMigrated').innerText = `${(data.total_rows_migrated || 0).toLocaleString()} baris`;
+        }
+
+        hideBgMigrationBanner();
 
         // Resolve active batch promises
         Object.keys(activeBatchTrackers).forEach(bIdx => {
@@ -686,6 +763,22 @@
           }
         });
         activeBatchTrackers = {};
+
+      } else if (evt === 'reconnect_status') {
+        // Sent by server when a NEW browser/tab connects — restores current state
+        if (data.is_running) {
+          showBgMigrationBanner(data);
+          startBgPolling();
+          const processed = data.tables_processed || 0;
+          const total = data.total_tables || 0;
+          const pct = total > 0 ? Math.round((processed / total) * 100) : 0;
+          document.getElementById('statTablesProcessed').innerText = `${processed} / ${total}`;
+          document.getElementById('statCurrentTable').innerText = data.current_table_name || '-';
+          document.getElementById('statRowsMigrated').innerText = `${(data.total_rows_migrated || 0).toLocaleString()} baris`;
+          document.getElementById('progressBar').style.width = `${pct}%`;
+          document.getElementById('progressText').innerText = `[${processed}/${total}] Migrasi sedang berjalan di server...`;
+          appendLog(`🔄 [RECONNECTED] Migrasi sedang berjalan: ${processed}/${total} tabel selesai. Tabel aktif: '${data.current_table_name || '-'}'`, 'info');
+        }
       }
     }
 
@@ -1443,7 +1536,10 @@
       restorePersistentState();
       pollMigrationProgress();
       setInterval(pollMigrationProgress, 2000);
+      // Check if a migration is already running on server (works when opening from new browser/laptop)
+      await checkServerMigrationStatus();
     };
+
   </script>
 </body>
 

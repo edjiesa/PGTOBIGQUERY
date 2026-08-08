@@ -1,6 +1,7 @@
 import json
 import asyncio
 import logging
+import threading
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 from contextlib import asynccontextmanager
@@ -23,6 +24,10 @@ logger = logging.getLogger("pgtobigquery.web")
 
 main_event_loop: Optional[asyncio.AbstractEventLoop] = None
 
+# Persistent background migration thread tracker
+_bg_migration_thread: Optional[threading.Thread] = None
+_bg_migration_lock = threading.Lock()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -43,6 +48,7 @@ web_app = FastAPI(
 
 # Active WebSocket connections for live logs
 active_websockets: List[WebSocket] = []
+
 
 
 class ConfigUpdateModel(BaseModel):
@@ -312,8 +318,18 @@ def get_table_batches(background_tasks: BackgroundTasks, batch_size: int = 100):
 
 
 @web_app.post("/api/migrate")
-async def start_migration(req: MigrationRequestModel, background_tasks: BackgroundTasks):
-    """Starts migration task in background using thread-safe event loop dispatch."""
+async def start_migration(req: MigrationRequestModel):
+    """Starts migration as a persistent daemon thread - survives browser close."""
+    global _bg_migration_thread
+
+    with _bg_migration_lock:
+        # Prevent duplicate concurrent migrations
+        if _bg_migration_thread and _bg_migration_thread.is_alive():
+            return {
+                "status": "already_running",
+                "message": "Migration is already running in background. Monitor progress from any browser."
+            }
+
     def run_bg_migration():
         def ws_callback(event):
             safe_ws_broadcast(event)
@@ -327,6 +343,7 @@ async def start_migration(req: MigrationRequestModel, background_tasks: Backgrou
                     )
 
         try:
+            state_manager.clear_migration_status()
             migrator = DatabaseMigrator(config)
             migrator.run_migration(
                 tables=req.tables,
@@ -334,15 +351,49 @@ async def start_migration(req: MigrationRequestModel, background_tasks: Backgrou
                 dry_run=req.dry_run,
                 progress_callback=ws_callback
             )
+            safe_ws_broadcast({"event": "migration_finished", "data": {"message": "Migrasi selesai!"}})
         except Exception as e:
-            logger.error(f"Migration task error: {e}", exc_info=True)
+            logger.error(f"Background migration thread error: {e}", exc_info=True)
             safe_ws_broadcast({
                 "event": "table_error",
-                "data": {"table_name": "MIGRATION_JOB", "error": f"Background migration failed: {str(e)}"}
+                "data": {"table_name": "MIGRATION_JOB", "error": f"Migration failed: {str(e)}"}
             })
 
-    background_tasks.add_task(run_bg_migration)
-    return {"status": "started", "message": "Migration process started in background."}
+    with _bg_migration_lock:
+        _bg_migration_thread = threading.Thread(
+            target=run_bg_migration,
+            name="migration-daemon",
+            daemon=True   # Dies only when server process dies, NOT when browser closes
+        )
+        _bg_migration_thread.start()
+
+    return {
+        "status": "started",
+        "message": "Migration started as background daemon. You can close this browser safely — migration will continue running on the server."
+    }
+
+
+@web_app.get("/api/migration-running")
+def is_migration_running():
+    """Returns whether a background migration is currently running. Callable from any browser."""
+    is_running = _bg_migration_thread is not None and _bg_migration_thread.is_alive()
+    persisted = state_manager.load_migration_status()
+    progress = active_migration_status if is_running else persisted
+    return {
+        "is_running": is_running,
+        "thread_alive": is_running,
+        "progress": progress
+    }
+
+
+@web_app.post("/api/migration-stop")
+def stop_migration():
+    """Signals the background migration to stop after the current table finishes."""
+    active_migration_status["stop_requested"] = True
+    return {"status": "stop_requested", "message": "Stop signal sent. Migration will finish the current table then stop."}
+
+
+
 
 
 
@@ -385,27 +436,51 @@ def migrate_single_table(req: MigrationRequestModel):
 
 
 @web_app.get("/api/migration-progress")
-
 def get_migration_progress():
-    """Returns real-time migration progress metrics for HTTP polling fallbacks."""
+    """Returns real-time migration progress. Merges live in-memory state + persisted disk state so any browser gets full status."""
+    is_thread_alive = _bg_migration_thread is not None and _bg_migration_thread.is_alive()
+
+    # Use live in-memory if thread running, else fall back to last persisted status
+    if is_thread_alive:
+        progress = dict(active_migration_status)
+    else:
+        progress = state_manager.load_migration_status()
+        progress["is_running"] = False
+
     cached_stats = state_manager.load_stats()
     return {
-        "status": "running" if active_migration_status.get("is_running") else "idle",
-        "progress": active_migration_status,
+        "status": "running" if is_thread_alive else "idle",
+        "thread_alive": is_thread_alive,
+        "progress": progress,
         "saved_stats": cached_stats
     }
 
 
 @web_app.websocket("/ws/logs")
-
 async def websocket_logs(websocket: WebSocket):
-    """WebSocket endpoint for real-time progress & log updates."""
+    """WebSocket endpoint for real-time progress & log updates.
+    On connect, immediately sends current migration status so reconnecting browsers are caught up.
+    """
     await websocket.accept()
     active_websockets.append(websocket)
+
+    # Send current status immediately on connect so reconnecting browsers catch up instantly
+    try:
+        is_thread_alive = _bg_migration_thread is not None and _bg_migration_thread.is_alive()
+        current_progress = dict(active_migration_status) if is_thread_alive else state_manager.load_migration_status()
+        current_progress["is_running"] = is_thread_alive
+        await websocket.send_json({
+            "event": "reconnect_status",
+            "data": current_progress
+        })
+    except Exception:
+        pass
+
     try:
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:
         if websocket in active_websockets:
             active_websockets.remove(websocket)
+
 
