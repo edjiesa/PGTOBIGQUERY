@@ -94,10 +94,15 @@ async def health_check():
 @web_app.get("/", response_class=HTMLResponse)
 async def get_dashboard(request: Request):
     """Renders main dashboard HTML page."""
+    # Create a safe copy for the frontend to hide sensitive JSON key
+    safe_config = config.model_copy() if hasattr(config, "model_copy") else config.copy()
+    if safe_config.gcp_sa_key_json and safe_config.gcp_sa_key_json.strip():
+        safe_config.gcp_sa_key_json = "******** (Key is configured)"
+
     return templates.TemplateResponse(
         request=request,
         name="index.html",
-        context={"config": config}
+        context={"config": safe_config}
     )
 
 
@@ -105,6 +110,7 @@ async def get_dashboard(request: Request):
 @web_app.get("/api/config")
 async def get_config():
     """Returns current environment configuration."""
+    masked_key = "******** (Key is configured)" if config.gcp_sa_key_json and config.gcp_sa_key_json.strip() else None
     return {
         "pg_host": config.pg_host,
         "pg_port": config.pg_port,
@@ -114,7 +120,7 @@ async def get_config():
         "pg_sslmode": config.pg_sslmode,
         "gcp_project_id": config.gcp_project_id,
         "bigquery_dataset_id": config.bigquery_dataset_id,
-        "gcp_sa_key_json": config.gcp_sa_key_json,
+        "gcp_sa_key_json": masked_key,
         "batch_size": config.batch_size,
         "write_disposition": config.write_disposition
     }
@@ -123,6 +129,15 @@ async def get_config():
 @web_app.post("/api/config")
 async def update_config(data: ConfigUpdateModel):
     """Updates active config parameters dynamically."""
+    
+    new_sa_key = data.gcp_sa_key_json
+    if new_sa_key == "******** (Key is configured)":
+        new_sa_key = config.gcp_sa_key_json
+    elif new_sa_key and new_sa_key.strip():
+        pass
+    else:
+        new_sa_key = None
+        
     config.update_settings(
         pg_host=data.pg_host,
         pg_port=data.pg_port,
@@ -133,7 +148,7 @@ async def update_config(data: ConfigUpdateModel):
         pg_sslmode=data.pg_sslmode,
         gcp_project_id=data.gcp_project_id,
         bigquery_dataset_id=data.bigquery_dataset_id,
-        gcp_sa_key_json=data.gcp_sa_key_json if data.gcp_sa_key_json and data.gcp_sa_key_json.strip() else None,
+        gcp_sa_key_json=new_sa_key,
         batch_size=data.batch_size,
         write_disposition=data.write_disposition
     )
