@@ -24,16 +24,23 @@ class PostgresExtractor:
             except Exception:
                 self.close()
 
-        self.conn = psycopg2.connect(
-            host=self.config.pg_host,
-            port=self.config.pg_port,
-            user=self.config.pg_user,
-            password=self.config.pg_password,
-            dbname=self.config.pg_database,
-            sslmode=self.config.pg_sslmode,
-            connect_timeout=3
-        )
+        conn_kwargs = {
+            "host": self.config.pg_host,
+            "port": self.config.pg_port,
+            "user": self.config.pg_user,
+            "password": self.config.pg_password,
+            "dbname": self.config.pg_database,
+            "sslmode": self.config.pg_sslmode or "disable",
+            "connect_timeout": 3
+        }
+
+        try:
+            self.conn = psycopg2.connect(**conn_kwargs, gssencmode="disable")
+        except Exception:
+            self.conn = psycopg2.connect(**conn_kwargs)
+
         logger.info(f"Connected to PostgreSQL at {self.config.pg_host}:{self.config.pg_port}/{self.config.pg_database} (sslmode={self.config.pg_sslmode})")
+
 
     def close(self):
         """Closes PostgreSQL database connection."""

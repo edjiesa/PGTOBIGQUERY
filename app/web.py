@@ -36,7 +36,8 @@ class ConfigUpdateModel(BaseModel):
     pg_password: str = ""
     pg_database: str = "postgres"
     pg_schema: str = "public"
-    pg_sslmode: str = "prefer"
+    pg_sslmode: str = "disable"
+
     gcp_project_id: Optional[str] = ""
     bigquery_dataset_id: Optional[str] = ""
     gcp_sa_key_json: Optional[str] = None

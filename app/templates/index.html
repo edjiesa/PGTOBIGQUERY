@@ -410,12 +410,13 @@
           <div class="form-group">
             <label>SSL Mode (For Secure Remote Databases)</label>
             <select id="pg_sslmode" class="form-control">
+              <option value="disable" {% if config.pg_sslmode == "disable" or not config.pg_sslmode %}selected{% endif %}>disable (Fastest - No SSL, recommended for remote IP)</option>
               <option value="prefer" {% if config.pg_sslmode == "prefer" %}selected{% endif %}>prefer (Try SSL, fallback to unencrypted)</option>
-              <option value="disable" {% if config.pg_sslmode == "disable" %}selected{% endif %}>disable (No SSL encryption)</option>
               <option value="require" {% if config.pg_sslmode == "require" %}selected{% endif %}>require (Require SSL connection)</option>
               <option value="verify-ca" {% if config.pg_sslmode == "verify-ca" %}selected{% endif %}>verify-ca (SSL with CA Certificate)</option>
               <option value="verify-full" {% if config.pg_sslmode == "verify-full" %}selected{% endif %}>verify-full (Full SSL Host Verification)</option>
             </select>
+
           </div>
 
           <div style="margin-bottom: 1rem; text-align: right;">

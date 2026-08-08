@@ -18,7 +18,7 @@ class MigrationConfig(BaseSettings):
     pg_password: str = Field(default="postgres", alias="PG_PASSWORD")
     pg_database: str = Field(default="postgres", alias="PG_DATABASE")
     pg_schema: str = Field(default="public", alias="PG_SCHEMA")
-    pg_sslmode: str = Field(default="prefer", alias="PG_SSLMODE")
+    pg_sslmode: str = Field(default="disable", alias="PG_SSLMODE")
 
     # BigQuery Settings
     gcp_project_id: Optional[str] = Field(default=None, alias="GCP_PROJECT_ID")
