@@ -198,7 +198,11 @@ class DatabaseMigrator:
                     active_migration_status["tables_processed"] += 1
                     active_migration_status["last_completed_table"] = table_name
                     active_migration_status["last_completed_rows"] = 0
+                    if "logs" not in active_migration_status:
+                        active_migration_status["logs"] = []
+                    active_migration_status["logs"].append(f"✗ [MIGRATION ERROR] Table '{table_name}' failed: {table_err}")
                     notify_progress("table_error", table_err_info)
+
 
 
             # 4. Finish migration run

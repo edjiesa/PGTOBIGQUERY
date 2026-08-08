@@ -356,33 +356,92 @@ class PostgresExtractor:
 
 
 
-    def get_row_count(self, table_name: str, schema: str = None) -> int:
-        """Gets exact total row count for a table."""
+    def get_real_table_name(self, table_name: str, schema: str = None) -> str:
+        """Resolves exact case-sensitive relation name from PostgreSQL pg_class."""
         self.connect()
         target_schema = schema or self.config.pg_schema
-        query = f'SELECT COUNT(*) FROM "{target_schema}"."{table_name}";'
-        with self.conn.cursor() as cur:
-            cur.execute(query)
-            count = cur.fetchone()[0]
-        return count
+        try:
+            self.conn.rollback()
+            with self.conn.cursor() as cur:
+                cur.execute("""
+                    SELECT c.relname
+                    FROM pg_class c
+                    JOIN pg_namespace n ON n.oid = c.relnamespace
+                    WHERE n.nspname = %s AND LOWER(c.relname) = LOWER(%s);
+                """, (target_schema, table_name))
+                row = cur.fetchone()
+                if row and row[0]:
+                    return row[0]
+        except Exception:
+            try:
+                self.conn.rollback()
+            except Exception:
+                pass
+        return table_name
+
+    def get_row_count(self, table_name: str, schema: str = None) -> int:
+        """Gets exact total row count for a table with multi-query fallback."""
+        self.connect()
+        target_schema = schema or self.config.pg_schema
+        real_name = self.get_real_table_name(table_name, target_schema)
+
+        queries = [
+            f'SELECT COUNT(*) FROM "{target_schema}"."{real_name}";',
+            f'SELECT COUNT(*) FROM "{target_schema}"."{table_name}";',
+            f'SELECT COUNT(*) FROM {target_schema}.{real_name};',
+            f'SELECT COUNT(*) FROM {real_name};'
+        ]
+
+        for q in queries:
+            try:
+                self.conn.rollback()
+                with self.conn.cursor() as cur:
+                    cur.execute(q)
+                    return cur.fetchone()[0]
+            except Exception:
+                pass
+        return 0
 
     def stream_table_data(self, table_name: str, batch_size: int = 50000, schema: str = None) -> Generator[List[Dict[str, Any]], None, None]:
         """
-        Streams rows from PostgreSQL using a named server-side cursor to save memory.
+        Streams rows from PostgreSQL using named server-side cursor with automatic client-side cursor fallback.
         Yields list of dict rows for each batch.
         """
         self.connect()
         target_schema = schema or self.config.pg_schema
-        cursor_name = f"stream_{target_schema}_{table_name}".replace("-", "_")
+        real_name = self.get_real_table_name(table_name, target_schema)
+        cursor_name = f"stream_{target_schema}_{table_name}".replace("-", "_").replace(".", "_")
 
-        # Named cursor for server-side streaming
-        with self.conn.cursor(name=cursor_name, cursor_factory=RealDictCursor) as stream_cur:
-            stream_cur.itersize = batch_size
-            query = f'SELECT * FROM "{target_schema}"."{table_name}";'
-            stream_cur.execute(query)
+        # Attempt 1: Named server-side cursor
+        try:
+            self.conn.rollback()
+            with self.conn.cursor(name=cursor_name, cursor_factory=RealDictCursor) as stream_cur:
+                stream_cur.itersize = batch_size
+                query = f'SELECT * FROM "{target_schema}"."{real_name}";'
+                stream_cur.execute(query)
 
-            while True:
-                rows = stream_cur.fetchmany(batch_size)
-                if not rows:
-                    break
-                yield rows
+                while True:
+                    rows = stream_cur.fetchmany(batch_size)
+                    if not rows:
+                        break
+                    yield rows
+            return
+        except Exception as err:
+            logger.warning(f"Server-side cursor failed for table '{table_name}' ({err}), using standard cursor fallback...")
+
+        # Attempt 2: Standard client-side cursor fallback (for views, foreign tables, or special package relations)
+        try:
+            self.conn.rollback()
+            with self.conn.cursor(cursor_factory=RealDictCursor) as fallback_cur:
+                query = f'SELECT * FROM "{target_schema}"."{real_name}";'
+                fallback_cur.execute(query)
+
+                while True:
+                    rows = fallback_cur.fetchmany(batch_size)
+                    if not rows:
+                        break
+                    yield rows
+        except Exception as fallback_err:
+            logger.error(f"Streaming data failed for table '{table_name}': {fallback_err}")
+            raise fallback_err
+
