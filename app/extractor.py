@@ -166,19 +166,18 @@ class PostgresExtractor:
             SELECT 
                 c.relname AS table_name,
                 GREATEST(c.reltuples::bigint, 0) AS row_count,
-                COUNT(a.attname) AS column_count
+                c.relnatts AS column_count
             FROM pg_class c
             JOIN pg_namespace n ON n.oid = c.relnamespace
-            LEFT JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
             WHERE n.nspname = '{safe_schema}'
               AND c.relkind = 'r'
-            GROUP BY c.relname, c.reltuples
             ORDER BY c.relname;
         """
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
             try:
                 cur.execute(query)
                 rows = cur.fetchall()
+
 
                 result = []
                 for r in rows:
