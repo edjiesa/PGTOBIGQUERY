@@ -778,8 +778,9 @@
     async function loadTables() {
       await saveConfig();
       appendLog('Mengambil daftar tabel dari Remote PostgreSQL...', 'info');
-      const res = await safeFetchJson('/api/tables');
+      const res = await safeFetchJson('/api/tables', {}, 60000);
       const data = res.data;
+
 
       if (res.ok && data.status === 'success') {
         const container = document.getElementById('tableContainer');

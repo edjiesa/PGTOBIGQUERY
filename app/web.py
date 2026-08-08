@@ -154,25 +154,15 @@ def test_connections():
 
 @web_app.get("/api/tables")
 def list_tables():
-    """Fetches PostgreSQL tables and metadata (Runs off-thread)."""
+    """Fetches PostgreSQL tables and metadata in a single bulk query (Optimized for 1000+ tables)."""
     try:
         extractor = PostgresExtractor(config)
-        tables = extractor.get_tables()
-
-        result = []
-        for t in tables:
-            cnt = extractor.get_row_count(t)
-            cols = extractor.get_table_schema(t)
-            result.append({
-                "table_name": t,
-                "row_count": cnt,
-                "column_count": len(cols),
-                "columns": cols
-            })
+        tables = extractor.get_all_tables_metadata()
         extractor.close()
-        return {"status": "success", "tables": result}
+        return {"status": "success", "tables": tables}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
 
 
 

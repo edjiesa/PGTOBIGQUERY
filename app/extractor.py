@@ -153,7 +153,48 @@ class PostgresExtractor:
             self.close()
 
 
+    def get_all_tables_metadata(self, schema: str = None) -> List[Dict[str, Any]]:
+        """
+        Retrieves all table names, estimated row counts, and column counts in 1 SINGLE BULK QUERY.
+        Optimized for large databases with 1000+ tables.
+        """
+        self.connect()
+        target_schema = schema or self.config.pg_schema
+
+        query = """
+            SELECT 
+                c.relname AS table_name,
+                GREATEST(c.reltuples::bigint, 0) AS row_count,
+                COUNT(a.attname) AS column_count
+            FROM pg_class c
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            LEFT JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
+            WHERE n.nspname = %s
+              AND c.relkind = 'r'
+            GROUP BY c.relname, c.reltuples
+            ORDER BY c.relname;
+        """
+        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            try:
+                cur.execute(query, (target_schema,))
+                rows = cur.fetchall()
+                result = []
+                for r in rows:
+                    result.append({
+                        "table_name": r["table_name"],
+                        "row_count": int(r["row_count"]),
+                        "column_count": int(r["column_count"]),
+                        "columns": []
+                    })
+                return result
+            except Exception as e:
+                logger.warning(f"Bulk catalog query failed ({e}), falling back to get_tables")
+                self.conn.rollback()
+                tables = self.get_tables(target_schema)
+                return [{"table_name": t, "row_count": 0, "column_count": 0, "columns": []} for t in tables]
+
     def get_tables(self, schema: str = None) -> List[str]:
+
         """Retrieves list of user base tables in the specified PostgreSQL / EnterpriseDB schema."""
         self.connect()
         target_schema = schema or self.config.pg_schema
