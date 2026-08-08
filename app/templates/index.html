@@ -633,26 +633,25 @@
       } else if (evt === 'batch_complete') {
         document.getElementById('statCurrentTableRows').innerText = `${(data.total_rows_loaded || 0).toLocaleString()} / ${(data.total_expected || 0).toLocaleString()}`;
         appendLog(`📦 Streamed batch #${data.batch_num} for '${data.table_name}': ${(data.rows_batch || 0).toLocaleString()} rows -> Parquet written & uploaded to BigQuery`, 'info');
-      } else if (evt === 'table_success' || evt === 'table_error') {
-        if (evt === 'table_success') {
-          currentMigrationStats.tablesProcessed += 1;
-          currentMigrationStats.totalRowsMigrated += (data.bigquery_rows || 0);
+      } else if (evt === 'table_success') {
+        currentMigrationStats.tablesProcessed += 1;
+        currentMigrationStats.totalRowsMigrated += (data.bigquery_rows || 0);
 
-          const totalT = currentMigrationStats.totalTables || 1;
-          document.getElementById('statTablesProcessed').innerText = `${currentMigrationStats.tablesProcessed} / ${totalT}`;
-          document.getElementById('statRowsMigrated').innerText = `${currentMigrationStats.totalRowsMigrated.toLocaleString()} baris`;
-          document.getElementById('statCurrentTableRows').innerText = `${(data.bigquery_rows || 0).toLocaleString()} / ${(data.postgres_rows || 0).toLocaleString()}`;
+        const totalT = currentMigrationStats.totalTables || 1;
+        document.getElementById('statTablesProcessed').innerText = `${currentMigrationStats.tablesProcessed} / ${totalT}`;
+        document.getElementById('statRowsMigrated').innerText = `${currentMigrationStats.totalRowsMigrated.toLocaleString()} baris`;
+        document.getElementById('statCurrentTableRows').innerText = `${(data.bigquery_rows || 0).toLocaleString()} / ${(data.postgres_rows || 0).toLocaleString()}`;
 
-          const pct = Math.round((currentMigrationStats.tablesProcessed / totalT) * 100);
-          document.getElementById('progressBar').style.width = `${pct}%`;
+        const pct = Math.round((currentMigrationStats.tablesProcessed / totalT) * 100);
+        document.getElementById('progressBar').style.width = `${pct}%`;
 
-          appendLog(`✓ [SUCCESS] Table '${data.table_name}' -> ${(data.bigquery_rows || 0).toLocaleString()} BARIS SUKSES TERMUAT & DIVERIFIKASI DI BIGQUERY (${data.duration_seconds}s)`, 'success');
-          updateSingleTableRowStatus(data.table_name, 'SUCCESS', `✓ ${(data.bigquery_rows || 0).toLocaleString()} baris dimigrasi (${data.duration_seconds}s)`);
-        } else {
+        const bqRef = data.bq_table_ref || `${data.table_name}`;
+        appendLog(`🔨 [TABEL DIBENTUK DI BIGQUERY] '${bqRef}' (${data.columns_count || '?'} kolom)`, 'info');
+        appendLog(`🎉 [SELESAI DIBENTUK & TERISI] Tabel BigQuery '${bqRef}' -> ${(data.bigquery_rows || 0).toLocaleString()} / ${(data.postgres_rows || 0).toLocaleString()} baris data SUKSES TERVERIFIKASI TERMUAT (Durasi: ${data.duration_seconds}s)`, 'success');
+        updateSingleTableRowStatus(data.table_name, 'SUCCESS', `✓ ${(data.bigquery_rows || 0).toLocaleString()} baris dimigrasi (${data.duration_seconds}s)`);
+      } else if (evt === 'table_error') {
           appendLog(`✗ [ERROR] Table '${data.table_name}' gagal: ${data.error}`, 'error');
           updateSingleTableRowStatus(data.table_name, 'FAILED', `✗ Gagal: ${data.error}`);
-        }
-
         // Update active batch progress bars live
         Object.keys(activeBatchTrackers).forEach(bIdx => {
           const tracker = activeBatchTrackers[bIdx];
