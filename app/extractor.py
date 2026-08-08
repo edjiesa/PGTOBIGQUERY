@@ -214,86 +214,109 @@ class PostgresExtractor:
     def get_table_schema(self, table_name: str, schema: str = None) -> List[Dict[str, Any]]:
         """
         Extracts ALL column definitions, PostgreSQL data types, and nullability for a table.
-        Queries pg_attribute catalog directly (EnterpriseDB Advanced Server & PostgreSQL compatible).
+        Queries pg_attribute catalog directly with clean transaction rollbacks & OID resolution.
         """
         self.connect()
         target_schema = schema or self.config.pg_schema
 
-        # Query 1: Direct PostgreSQL system catalog (pg_attribute) - EDB & Postgres compatible
-        query_pg_catalog = """
-            SELECT 
-                a.attname AS column_name,
-                format_type(a.atttypid, a.atttypmod) AS data_type,
-                t.typname AS udt_name,
-                NOT a.attnotnull AS is_nullable,
-                a.attnum AS ordinal_position
-            FROM pg_attribute a
-            JOIN pg_class c ON c.oid = a.attrelid
-            JOIN pg_namespace n ON n.oid = c.relnamespace
-            JOIN pg_type t ON t.oid = a.atttypid
-            WHERE n.nspname = %s 
-              AND LOWER(c.relname) = LOWER(%s)
-              AND a.attnum > 0 
-              AND NOT a.attisdropped
-            ORDER BY a.attnum;
-        """
         columns = []
-        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
-            try:
+
+        # Attempt 1: Direct system catalog (pg_attribute) - EDB & Postgres compatible
+        try:
+            self.conn.rollback()
+            query_pg_catalog = """
+                SELECT 
+                    a.attname AS column_name,
+                    format_type(a.atttypid, a.atttypmod) AS data_type,
+                    t.typname AS udt_name,
+                    NOT a.attnotnull AS is_nullable,
+                    a.attnum AS ordinal_position
+                FROM pg_attribute a
+                JOIN pg_class c ON c.oid = a.attrelid
+                JOIN pg_namespace n ON n.oid = c.relnamespace
+                JOIN pg_type t ON t.oid = a.atttypid
+                WHERE n.nspname = %s 
+                  AND LOWER(c.relname) = LOWER(%s)
+                  AND a.attnum > 0 
+                  AND NOT a.attisdropped
+                ORDER BY a.attnum;
+            """
+            with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute(query_pg_catalog, (target_schema, table_name))
                 columns = cur.fetchall()
-            except Exception as e:
-                logger.warning(f"pg_attribute query failed ({e}), trying information_schema")
+        except Exception as e:
+            logger.warning(f"pg_attribute catalog query failed for '{table_name}': {e}")
+            try:
                 self.conn.rollback()
+            except Exception:
+                pass
 
-            # Query 2 Fallback: information_schema.columns (case-insensitive)
-            if not columns:
-                try:
-                    query_inf_schema = """
-                        SELECT 
-                            column_name,
-                            data_type,
-                            udt_name,
-                            is_nullable,
-                            ordinal_position
-                        FROM information_schema.columns
-                        WHERE table_schema = %s AND LOWER(table_name) = LOWER(%s)
-                        ORDER BY ordinal_position;
-                    """
+        # Attempt 2: Fallback to information_schema.columns (case-insensitive)
+        if not columns:
+            try:
+                self.conn.rollback()
+                query_inf_schema = """
+                    SELECT 
+                        column_name,
+                        data_type,
+                        udt_name,
+                        is_nullable,
+                        ordinal_position
+                    FROM information_schema.columns
+                    WHERE table_schema = %s AND LOWER(table_name) = LOWER(%s)
+                    ORDER BY ordinal_position;
+                """
+                with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
                     cur.execute(query_inf_schema, (target_schema, table_name))
                     columns = cur.fetchall()
-                except Exception as e:
-                    logger.warning(f"information_schema query failed ({e})")
-                    self.conn.rollback()
-
-            # Query 3 Ultimate Fallback: SELECT * LIMIT 0 description
-            if not columns:
+            except Exception as e:
+                logger.warning(f"information_schema query failed for '{table_name}': {e}")
                 try:
+                    self.conn.rollback()
+                except Exception:
+                    pass
+
+        # Attempt 3: Ultimate Fallback - SELECT * FROM table LIMIT 0 (psycopg2 description + OID format)
+        if not columns:
+            try:
+                self.conn.rollback()
+                with self.conn.cursor() as cur:
                     cur.execute(f'SELECT * FROM "{target_schema}"."{table_name}" WHERE 1=0;')
                     if cur.description:
-                        columns = [
-                            {
-                                "column_name": desc[0],
-                                "data_type": "text",
-                                "udt_name": "text",
-                                "is_nullable": "YES",
-                                "ordinal_position": idx + 1
-                            }
-                            for idx, desc in enumerate(cur.description)
-                        ]
-                except Exception as desc_err:
-                    logger.error(f"Fallback SELECT * failed for table {table_name}: {desc_err}")
+                        columns = []
+                        for idx, desc in enumerate(cur.description, start=1):
+                            col_name = desc[0]
+                            type_oid = desc[1]
+                            type_name = "varchar"
+                            try:
+                                cur.execute("SELECT format_type(%s, NULL);", (type_oid,))
+                                row = cur.fetchone()
+                                if row and row[0]:
+                                    type_name = row[0]
+                            except Exception:
+                                pass
+                            columns.append({
+                                "column_name": col_name,
+                                "data_type": type_name,
+                                "udt_name": type_name,
+                                "is_nullable": True,
+                                "ordinal_position": idx
+                            })
+            except Exception as desc_err:
+                logger.error(f"Fallback SELECT * failed for table '{table_name}': {desc_err}")
+                try:
                     self.conn.rollback()
+                except Exception:
+                    pass
 
         result = []
         for col in columns:
-            col_name = col["column_name"]
+            col_name = str(col["column_name"])
             data_type = str(col["data_type"])
             udt_name = str(col["udt_name"])
             is_null = col.get("is_nullable")
             is_nullable = is_null if isinstance(is_null, bool) else (str(is_null).upper() in ("YES", "TRUE", "1"))
 
-            # Normalize data type format_type output (e.g. character varying(255) -> varchar)
             clean_type = data_type.lower()
             if "character varying" in clean_type or "varchar" in clean_type:
                 pg_type = "varchar"
@@ -319,6 +342,7 @@ class PostgresExtractor:
 
         logger.info(f"Extracted {len(result)} columns for table '{table_name}'")
         return result
+
 
 
     def get_row_count(self, table_name: str, schema: str = None) -> int:
