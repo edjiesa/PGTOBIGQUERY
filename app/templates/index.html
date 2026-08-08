@@ -472,12 +472,28 @@
           <ul id="bqChecklist" class="airbyte-checklist"></ul>
         </div>
 
+        <!-- 1-Click Master Automation Card -->
+        <div class="card" style="margin-bottom: 1.5rem; background: linear-gradient(135deg, rgba(16, 185, 129, 0.12), rgba(59, 130, 246, 0.12)); border: 1px solid rgba(16, 185, 129, 0.3);">
+          <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+            <div>
+              <div style="font-weight: 700; font-size: 1.1rem; color: #10b981;">🚀 1-CLICK PROSES MIGRASI OTOMATIS</div>
+              <div style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.2rem;">
+                Muat 1.400+ tabel &rarr; Urutkan baris terkecil ke terbesar &rarr; Kelompokkan per 100 tabel &rarr; Eksekusi otomatis berurutan (1-Process)
+              </div>
+            </div>
+            <button id="btnOneClickSync" class="btn btn-primary" style="padding: 0.75rem 1.5rem; font-size: 0.95rem; font-weight: 700; background: linear-gradient(135deg, #10b981, #059669); border: none; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);" onclick="startOneClickFullAutomatedSync()">
+              ⚡ JALANKAN SYNC OTOMATIS (1-CLICK)
+            </button>
+          </div>
+        </div>
+
         <!-- Table Selector & Migration Action -->
         <div class="card">
           <div class="card-header">
             <div class="card-title">📦 Remote PostgreSQL Tables</div>
             <button class="btn btn-secondary" onclick="loadTables()">Muat Tabel Remote</button>
           </div>
+
 
           <div id="tableContainer" class="table-list">
             <div style="text-align: center; padding: 2rem; color: var(--text-muted);">
@@ -1076,6 +1092,60 @@
       appendLog(`🎉 Selesai mememicu seluruh ${loadedBatchesData.length} Kelompok Tabel!`, 'success');
       if (btn) btn.disabled = false;
     }
+
+    async function startOneClickFullAutomatedSync() {
+      const btn = document.getElementById('btnOneClickSync');
+      if (btn) btn.disabled = true;
+
+      try {
+        await saveConfig();
+
+        appendLog('=====================================================', 'info');
+        appendLog('🚀 MEMULAI PROSES MIGRASI OTOMATIS 1-CLICK (1 PROCESS AUTOMATION)', 'success');
+        appendLog('=====================================================', 'info');
+
+        // Step 1: Load tables if not already in memory
+        if (!rawLoadedTables || rawLoadedTables.length === 0) {
+          appendLog('⏳ [Langkah 1/3] Mengambil daftar 1.400+ tabel dari remote database...', 'info');
+          const startRes = await safeFetchJson('/api/tables');
+          let data;
+          if (startRes.ok && startRes.data.status === 'started') {
+            try {
+              data = await pollJobUntilDone(startRes.data.job_id);
+            } catch (err) {
+              data = { status: 'error', message: String(err) };
+            }
+          } else {
+            data = startRes.data;
+          }
+
+          if (data.status === 'success' && data.tables) {
+            rawLoadedTables = data.tables;
+          } else {
+            appendLog(`✗ Gagal mengambil daftar tabel: ${data.message || 'Error'}`, 'error');
+            return;
+          }
+        }
+
+        // Step 2: Instant group tables by row count ASC
+        appendLog(`⏳ [Langkah 2/3] Mengelompokkan ${rawLoadedTables.length.toLocaleString()} tabel per 100 tabel (urut baris terkecil -> terbesar)...`, 'info');
+        await loadTableBatches();
+
+        if (loadedBatchesData.length === 0) {
+          appendLog('✗ Gagal mengelompokkan tabel.', 'error');
+          return;
+        }
+
+        // Step 3: Run all batches sequentially from smallest to largest
+        appendLog(`⏳ [Langkah 3/3] Memulai eksekusi otomatis ${loadedBatchesData.length} Kelompok Tabel secara berurutan...`, 'info');
+        await startAllBatchesSequentially();
+      } catch (err) {
+        appendLog(`✗ Terjadi kesalahan pada proses 1-Click Sync: ${err}`, 'error');
+      } finally {
+        if (btn) btn.disabled = false;
+      }
+    }
+
 
     window.onload = () => {
       initWS();
