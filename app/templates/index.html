@@ -519,8 +519,28 @@
     <!-- Terminal & Progress Logs -->
     <div class="card">
       <div class="card-header">
-        <div class="card-title">📊 Live Migration Terminal & Progress</div>
+        <div class="card-title">📊 Live Migration Terminal & Progress Monitor</div>
         <span id="progressText" style="font-size: 0.85rem; color: var(--text-muted);">Status: Ready</span>
+      </div>
+
+      <!-- Real-Time Live Migration Counter Dashboard -->
+      <div id="liveMigrationStats" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.75rem; margin-bottom: 1rem;">
+        <div style="padding: 0.75rem; background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); border-radius: 8px; text-align: center;">
+          <div style="font-size: 0.75rem; color: var(--text-muted); font-weight: 600;">PROGRES TABEL</div>
+          <div id="statTablesProcessed" style="font-size: 1.35rem; font-weight: 800; color: #60a5fa; margin-top: 0.25rem;">0 / 0</div>
+        </div>
+        <div style="padding: 0.75rem; background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); border-radius: 8px; text-align: center;">
+          <div style="font-size: 0.75rem; color: var(--text-muted); font-weight: 600;">TOTAL ROWS IN BIGQUERY</div>
+          <div id="statRowsMigrated" style="font-size: 1.35rem; font-weight: 800; color: #10b981; margin-top: 0.25rem;">0 baris</div>
+        </div>
+        <div style="padding: 0.75rem; background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); border-radius: 8px; text-align: center;">
+          <div style="font-size: 0.75rem; color: var(--text-muted); font-weight: 600;">TABEL AKTIF</div>
+          <div id="statCurrentTable" style="font-size: 0.95rem; font-weight: 700; color: #f59e0b; margin-top: 0.25rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">-</div>
+        </div>
+        <div style="padding: 0.75rem; background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); border-radius: 8px; text-align: center;">
+          <div style="font-size: 0.75rem; color: var(--text-muted); font-weight: 600;">ROWS TABEL INI</div>
+          <div id="statCurrentTableRows" style="font-size: 1.35rem; font-weight: 800; color: #a78bfa; margin-top: 0.25rem;">0 / 0</div>
+        </div>
       </div>
 
       <div class="progress-bar-container">
@@ -553,26 +573,84 @@
       term.scrollTop = term.scrollHeight;
     }
 
+    let currentMigrationStats = {
+      totalTables: 0,
+      tablesProcessed: 0,
+      totalRowsMigrated: 0
+    };
+
+    function updateSingleTableRowStatus(tableName, status, message) {
+      const el = document.getElementById(`tableStatus_${tableName}`);
+      if (el) {
+        if (status === 'RUNNING') {
+          el.innerHTML = `<span style="color:#f59e0b; font-weight:600;">⏳ ${message}</span>`;
+        } else if (status === 'SUCCESS') {
+          el.innerHTML = `<span style="color:#10b981; font-weight:600;">${message}</span>`;
+        } else if (status === 'FAILED') {
+          el.innerHTML = `<span style="color:#ef4444; font-weight:600;">${message}</span>`;
+        }
+      }
+    }
+
     function handleWSMessage(msg) {
       const evt = msg.event;
       const data = msg.data;
 
       if (evt === 'start') {
-        appendLog(`Memulai migrasi untuk ${data.total_tables} tabel. (Dry Run: ${data.dry_run})`, 'info');
+        currentMigrationStats.totalTables = data.total_tables || 0;
+        currentMigrationStats.tablesProcessed = 0;
+        currentMigrationStats.totalRowsMigrated = 0;
+
+        document.getElementById('statTablesProcessed').innerText = `0 / ${currentMigrationStats.totalTables}`;
+        document.getElementById('statRowsMigrated').innerText = `0 baris`;
+        document.getElementById('statCurrentTable').innerText = `Memulai...`;
+        document.getElementById('statCurrentTableRows').innerText = `0 / 0`;
+
+        appendLog(`🚀 [START] Memulai migrasi ${data.total_tables} tabel ke BigQuery...`, 'info');
         document.getElementById('progressBar').style.width = '0%';
+        document.getElementById('progressText').innerText = `Memulai migrasi ${data.total_tables} tabel...`;
       } else if (evt === 'table_start') {
-        appendLog(`Processing tabel: ${data.table_name} (${data.row_count} baris)...`, 'info');
-        document.getElementById('progressText').innerText = `Migrating ${data.table_name}...`;
+        const tableIdx = data.table_index || (currentMigrationStats.tablesProcessed + 1);
+        const totalT = data.total_tables || currentMigrationStats.totalTables;
+        document.getElementById('statTablesProcessed').innerText = `${tableIdx - 1} / ${totalT}`;
+        document.getElementById('statCurrentTable').innerText = data.table_name;
+        document.getElementById('statCurrentTableRows').innerText = `0 / ${(data.row_count || 0).toLocaleString()}`;
+        document.getElementById('progressText').innerText = `[${tableIdx}/${totalT}] Migrating '${data.table_name}' (${(data.row_count || 0).toLocaleString()} rows)...`;
+
+        const pct = Math.round(((tableIdx - 1) / totalT) * 100);
+        document.getElementById('progressBar').style.width = `${pct}%`;
+
+        appendLog(`⏳ [${tableIdx}/${totalT}] Processing table '${data.table_name}' (PostgreSQL: ${(data.row_count || 0).toLocaleString()} baris)...`, 'info');
+        updateSingleTableRowStatus(data.table_name, 'RUNNING', `Proses migrasi ke BigQuery...`);
+      } else if (evt === 'batch_complete') {
+        document.getElementById('statCurrentTableRows').innerText = `${(data.total_rows_loaded || 0).toLocaleString()} / ${(data.total_expected || 0).toLocaleString()}`;
+        appendLog(`📦 Streamed batch #${data.batch_num} for '${data.table_name}': ${(data.rows_batch || 0).toLocaleString()} rows -> Parquet written & uploaded to BigQuery`, 'info');
       } else if (evt === 'table_success') {
-        appendLog(`✓ Tabel ${data.table_name} sukses! ${data.postgres_rows} baris dimigrasi (${data.duration_seconds}s)`, 'success');
+        currentMigrationStats.tablesProcessed += 1;
+        currentMigrationStats.totalRowsMigrated += (data.bigquery_rows || 0);
+
+        const totalT = currentMigrationStats.totalTables || 1;
+        document.getElementById('statTablesProcessed').innerText = `${currentMigrationStats.tablesProcessed} / ${totalT}`;
+        document.getElementById('statRowsMigrated').innerText = `${currentMigrationStats.totalRowsMigrated.toLocaleString()} baris`;
+        document.getElementById('statCurrentTableRows').innerText = `${(data.bigquery_rows || 0).toLocaleString()} / ${(data.postgres_rows || 0).toLocaleString()}`;
+
+        const pct = Math.round((currentMigrationStats.tablesProcessed / totalT) * 100);
+        document.getElementById('progressBar').style.width = `${pct}%`;
+
+        appendLog(`✓ [SUCCESS] Table '${data.table_name}' -> ${(data.bigquery_rows || 0).toLocaleString()} BARIS SUKSES TERMUAT & DIVERIFIKASI DI BIGQUERY (${data.duration_seconds}s)`, 'success');
+        updateSingleTableRowStatus(data.table_name, 'SUCCESS', `✓ ${(data.bigquery_rows || 0).toLocaleString()} baris dimigrasi (${data.duration_seconds}s)`);
       } else if (evt === 'table_error') {
-        appendLog(`✗ Tabel ${data.table_name} gagal: ${data.error}`, 'error');
+        appendLog(`✗ [ERROR] Table '${data.table_name}' gagal: ${data.error}`, 'error');
+        updateSingleTableRowStatus(data.table_name, 'FAILED', `✗ Gagal: ${data.error}`);
       } else if (evt === 'finish') {
-        appendLog(`🎉 Migrasi selesai! Total ${data.tables_processed} tabel, ${data.total_rows_migrated} baris dimigrasi dalam ${data.total_duration_seconds}s.`, 'success');
+        appendLog(`🎉 [MIGRATION COMPLETED] Total ${data.tables_processed} tabel & ${(data.total_rows_migrated || 0).toLocaleString()} BARIS SUKSES DIMIGRASIKAN KE BIGQUERY dalam ${data.total_duration_seconds}s!`, 'success');
         document.getElementById('progressBar').style.width = '100%';
-        document.getElementById('progressText').innerText = 'Migrasi Selesai';
+        document.getElementById('progressText').innerText = `Migrasi Selesai (Total ${(data.total_rows_migrated || 0).toLocaleString()} baris in BigQuery)`;
+        document.getElementById('statTablesProcessed').innerText = `${data.tables_processed} / ${data.tables_processed}`;
+        document.getElementById('statRowsMigrated').innerText = `${(data.total_rows_migrated || 0).toLocaleString()} baris`;
       }
     }
+
 
     function handleFileUpload(event) {
       const file = event.target.files[0];
@@ -980,13 +1058,15 @@
           <div style="display:flex; justify-content:space-between; align-items:center; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.05);">
             <div>
               <span style="font-weight:600; color:var(--text-main);">${t.table_name}</span>
-              <span style="color:#9ca3af; margin-left: 0.4rem; font-size:0.75rem;">(${t.column_count || '?'} kolom | ${(t.row_count || 0).toLocaleString()} baris)</span>
+              <span style="color:#9ca3af; margin-left: 0.4rem; font-size:0.75rem;">(${(t.row_count || 0).toLocaleString()} baris)</span>
+              <span id="tableStatus_${t.table_name}" style="margin-left: 0.5rem; font-size:0.75rem;"></span>
             </div>
             <button class="btn btn-secondary" style="padding: 0.15rem 0.5rem; font-size: 0.725rem; border-color: rgba(59,130,246,0.4); color: #60a5fa; background: rgba(59,130,246,0.1);" onclick="syncSingleTable('${t.table_name}')">
               ⚡ Sync Tabel Ini
             </button>
           </div>
         `).join('');
+
 
         container.innerHTML += `
           <div id="batchCard_${b.batch_index}" style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: 8px; padding: 1rem;">
