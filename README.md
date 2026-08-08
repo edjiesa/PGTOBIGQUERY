@@ -2,33 +2,36 @@
 
 ![PostgreSQL to BigQuery](https://img.shields.io/badge/PostgreSQL-10.4-336791?style=for-the-badge&logo=postgresql&logoColor=white)
 ![Google BigQuery](https://img.shields.io/badge/Google_BigQuery-4285F4?style=for-the-badge&logo=googlecloud&logoColor=white)
+![Airbyte Diagnostic](https://img.shields.io/badge/Airbyte--Style-Tester-647eee?style=for-the-badge)
 ![Docker Compose](https://img.shields.io/badge/Docker_Compose-2496ED?style=for-the-badge&logo=docker&logoColor=white)
 ![Python 3.11+](https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)
 
 A high-performance, containerized database migration tool designed specifically to migrate schema and data from **PostgreSQL 10.4** to **Google BigQuery**. 
 
-Features an **Apache Parquet streaming engine**, a **Rich CLI interface**, and a **Modern Web Dashboard (Web UI)** with real-time migration logs over WebSockets.
+Features an **Apache Parquet streaming engine**, an **Airbyte-Style Live Connection Diagnostic Tester**, a **Service Account JSON Key Editor**, and a **Modern Web Dashboard (Web UI)** with real-time migration logs over WebSockets.
 
 ---
 
 ## 🌟 Key Features
 
-1. **PostgreSQL 10.4 Type Compatibility**:
+1. **Airbyte-Style Live Connection Diagnostics**:
+   - Step-by-step diagnostic checklist for both **PostgreSQL** and **Google BigQuery**.
+   - Validates Service Account JSON key format, RSA credentials parsing, OAuth2 authentication, GCP Project access, BigQuery API permissions, and target dataset access.
+2. **GUI Service Account JSON Key Input & Uploader**:
+   - Paste GCP Service Account JSON key directly into the Web UI text area or upload via the `📁 Upload .json` button.
+   - Credentials are held securely in session memory for seamless browser-based setup.
+3. **PostgreSQL 10.4 Type Compatibility**:
    - Explicitly inspects PostgreSQL 10 catalog metadata (`information_schema` & `pg_catalog`).
    - Accurately converts Postgres 10 data types (`integer`, `bigint`, `numeric`, `double precision`, `boolean`, `json`, `jsonb`, `uuid`, `timestamp with/without timezone`, `date`, `bytea`, and `ARRAY` types like `text[]`).
-2. **High-Speed Parquet Data Pipeline**:
+4. **High-Speed Parquet Data Pipeline**:
    - Uses PostgreSQL server-side cursors (`FETCH N`) to stream data with minimal memory footprint.
    - Converts batches into in-memory/temporary Apache Parquet files (`pyarrow`).
    - Ingests data directly using Google BigQuery's high-speed Parquet Load API (`load_table_from_file`).
-3. **Flexible Execution Modes**:
-   - **Dry-Run Mode**: Inspect mapped BigQuery schemas and row counts without altering destination tables.
-   - **Write Disposition**: Supports `WRITE_TRUNCATE` (replace table), `WRITE_APPEND` (append rows), or `WRITE_EMPTY`.
-   - Table inclusion/exclusion filters.
-4. **Dual User Interface**:
+5. **Dual User Interface**:
+   - **Modern Web Dashboard**: Glassmorphism UI built with FastAPI + HTML5/CSS3 with Airbyte diagnostic cards & live WebSocket progress logs.
    - **Rich Terminal CLI**: Interactive colored progress bars, tables, and status screens.
-   - **Modern Web Dashboard**: Glassmorphism UI built with FastAPI + HTML5/CSS3 with live WebSocket progress logs.
-5. **Docker & Docker-Compose Ready**:
-   - Includes `Dockerfile` and `docker-compose.yml` bundled with a `postgres:10.4-alpine` test container preloaded with test sample data.
+6. **Docker & Docker-Compose Ready**:
+   - Includes `Dockerfile` and `docker-compose.yml` bundled with a `postgres:10.4-alpine` test container preloaded with sample test data.
 
 ---
 
@@ -51,35 +54,7 @@ Features an **Apache Parquet streaming engine**, a **Rich CLI interface**, and a
 
 ---
 
-## 🏗️ Project Architecture
-
-```
-PGTOBIGQUERY/
-├── app/
-│   ├── __init__.py
-│   ├── config.py              # Environment configuration loader
-│   ├── type_mapper.py         # Postgres 10.4 -> BigQuery schema converter
-│   ├── extractor.py           # Postgres metadata & server-side cursor extractor
-│   ├── loader.py              # PyArrow Parquet converter & BigQuery API uploader
-│   ├── migrator.py           # Migration orchestrator & status tracker
-│   ├── cli.py                 # Rich CLI command-line interface
-│   ├── web.py                 # FastAPI backend server
-│   └── templates/
-│       └── index.html         # Glassmorphism Web Dashboard UI
-├── tests/
-│   ├── test_type_mapper.py    # Unit tests for schema mapping
-│   └── test_extractor.py      # Unit tests for configuration & extraction
-├── Dockerfile                 # Multi-stage container build
-├── docker-compose.yml         # Container orchestration (App + Postgres 10.4)
-├── init_pg10_sample.sql       # Sample database seeding script
-├── requirements.txt           # Python package dependencies
-├── .env.example               # Configuration template
-└── README.md                  # Documentation
-```
-
----
-
-## ⚡ Quickstart Guide
+## ⚡ Quickstart Guide (Web UI / Docker)
 
 ### Option 1: Running with Docker Compose (Recommended)
 
@@ -89,26 +64,21 @@ PGTOBIGQUERY/
    cd PGTOBIGQUERY
    ```
 
-2. **Set up Google Cloud Credentials**:
-   Place your Google Cloud Service Account JSON key inside the project directory as `gcp-service-account.json`.
-
-3. **Configure Environment (`.env`)**:
-   Copy `.env.example` to `.env` and adjust your BigQuery project & dataset settings:
-   ```bash
-   cp .env.example .env
-   ```
-   *Edit `.env`*:
-   ```env
-   GCP_PROJECT_ID=your-gcp-project-id
-   BIGQUERY_DATASET_ID=pg10_migrated_db
-   ```
-
-4. **Start Container Stack**:
+2. **Start Container Stack**:
    ```bash
    docker-compose up --build
    ```
    - PostgreSQL 10.4 test database will automatically initialize with sample tables (`users`, `orders`, `products`).
-   - Access the **Web Dashboard** at `http://localhost:8000`.
+
+3. **Open Web Dashboard**:
+   Go to `http://localhost:8000` in your web browser.
+
+4. **Input Credentials & Test Connection (Airbyte-Style)**:
+   - Enter your **PostgreSQL Connection Details** (Host, Port, User, Password, Database, Schema).
+   - Enter your **GCP Project ID** and **BigQuery Dataset ID**.
+   - Paste your **GCP Service Account JSON Key** directly into the JSON Key textarea or click **`📁 Upload .json`**.
+   - Click **`🔍 Airbyte Test BigQuery`** and **`🔍 Airbyte Test PostgreSQL`** to verify all diagnostic checks pass (`CONNECTED` / `AUTHENTICATED`).
+   - Click **`⚡ Jalankan Migrasi`** to start migrating tables to Google BigQuery!
 
 ---
 
@@ -119,29 +89,29 @@ PGTOBIGQUERY/
    pip install -r requirements.txt
    ```
 
-2. **Test Database Connections**:
+2. **Set Configuration (`.env`)**:
+   ```bash
+   cp .env.example .env
+   ```
+
+3. **Test Database Connections**:
    ```bash
    python -m app.cli test-connection
    ```
 
-3. **Preview Schema Mapping**:
+4. **Preview Schema Mapping**:
    ```bash
    python -m app.cli schema-preview --schema public
    ```
 
-4. **Run Migration (Dry Run)**:
+5. **Run Migration (Dry Run)**:
    ```bash
    python -m app.cli migrate --dry-run
    ```
 
-5. **Execute Full Migration**:
+6. **Execute Full Migration**:
    ```bash
    python -m app.cli migrate --batch-size 50000
-   ```
-
-6. **Launch Web UI**:
-   ```bash
-   python -m app.cli serve --host 0.0.0.0 --port 8000
    ```
 
 ---
