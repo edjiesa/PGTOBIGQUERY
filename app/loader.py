@@ -161,7 +161,7 @@ class BigQueryLoader:
         """Converts PostgreSQL column schema list to BigQuery SchemaField list."""
         bq_fields = []
         for col in pg_columns:
-            name = col["column_name"]
+            name = sanitize_bq_column_name(col["column_name"])
             pg_type = col["pg_type"]
             bq_type, mode = postgres_to_bigquery_type(pg_type)
 
@@ -178,7 +178,7 @@ class BigQueryLoader:
         """Constructs PyArrow Schema for batch writing."""
         pa_fields = []
         for col in pg_columns:
-            name = col["column_name"]
+            name = sanitize_bq_column_name(col["column_name"])
             pg_type = col["pg_type"]
             is_nullable = col.get("is_nullable", True)
             pa_fields.append(postgres_to_pyarrow_field(name, pg_type, is_nullable))
@@ -197,15 +197,16 @@ class BigQueryLoader:
         # 2. Build column arrays
         col_data = {}
         for col in pg_columns:
-            col_name = col["column_name"]
+            raw_col_name = col["column_name"]
+            sanitized_name = sanitize_bq_column_name(raw_col_name)
             pg_type = col["pg_type"]
             bq_type, mode = postgres_to_bigquery_type(pg_type)
 
             values = [
-                convert_value_for_pyarrow(row.get(col_name), bq_type, mode)
+                convert_value_for_pyarrow(row.get(raw_col_name), bq_type, mode)
                 for row in batch_rows
             ]
-            col_data[col_name] = values
+            col_data[sanitized_name] = values
 
         # 3. Build PyArrow Table & write to Parquet
         pa_table = pa.Table.from_pydict(col_data, schema=pa_schema)

@@ -1,8 +1,25 @@
+import re
 import json
 import datetime
 from typing import Dict, Any, Tuple
 import pyarrow as pa
 from google.cloud import bigquery
+
+
+def sanitize_bq_column_name(name: str) -> str:
+    """
+    Sanitizes PostgreSQL column names to strictly comply with BigQuery naming rules:
+    - Must contain only letters (a-z, A-Z), numbers (0-9), or underscores (_)
+    - Cannot start with a digit
+    - Max 300 characters
+    """
+    if not name:
+        return "unnamed_column"
+    clean = re.sub(r'[^a-zA-Z0-9_]', '_', str(name).strip())
+    if clean and clean[0].isdigit():
+        clean = f"col_{clean}"
+    return clean[:300] or "unnamed_column"
+
 
 
 def postgres_to_bigquery_type(pg_type: str) -> Tuple[str, str]:
