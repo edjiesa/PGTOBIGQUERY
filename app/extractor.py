@@ -1,6 +1,7 @@
 import socket
 import logging
 import psycopg2
+import concurrent.futures
 from psycopg2.extras import RealDictCursor
 from typing import Dict, List, Any, Generator, Tuple
 from app.config import MigrationConfig
@@ -30,7 +31,7 @@ class PostgresExtractor:
             password=self.config.pg_password,
             dbname=self.config.pg_database,
             sslmode=self.config.pg_sslmode,
-            connect_timeout=5
+            connect_timeout=3
         )
         logger.info(f"Connected to PostgreSQL at {self.config.pg_host}:{self.config.pg_port}/{self.config.pg_database} (sslmode={self.config.pg_sslmode})")
 
@@ -73,13 +74,26 @@ class PostgresExtractor:
                     "checklist": checklist
                 }
 
-            # Step 2: Authentication Test
-            try:
+            # Step 2: Authentication Test (Hard 5s Timeout)
+            def do_connect():
                 self.connect()
                 with self.conn.cursor() as cur:
                     cur.execute("SELECT 1;")
+
+            try:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(do_connect)
+                    future.result(timeout=5.0)
                 checklist[1]["status"] = "success"
                 checklist[1]["detail"] = f"Authenticated as user '{self.config.pg_user}' on db '{self.config.pg_database}'"
+            except concurrent.futures.TimeoutError:
+                checklist[1]["status"] = "failed"
+                checklist[1]["detail"] = "Authentication timed out after 5s. If SSL is not configured on server, set SSL Mode to 'disable'."
+                return {
+                    "status": "failed",
+                    "message": "User Authentication timed out after 5s. Try setting SSL Mode to 'disable'.",
+                    "checklist": checklist
+                }
             except Exception as auth_err:
                 checklist[1]["status"] = "failed"
                 checklist[1]["detail"] = f"Authentication failed: {str(auth_err)}"
@@ -88,6 +102,7 @@ class PostgresExtractor:
                     "message": f"User Authentication failed: {str(auth_err)}",
                     "checklist": checklist
                 }
+
 
             # Step 3: Version Check
             try:
