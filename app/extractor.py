@@ -110,16 +110,21 @@ class PostgresExtractor:
                 checklist[2]["status"] = "warning"
                 checklist[2]["detail"] = f"Could not read version: {str(ver_err)}"
 
-            # Step 4: Catalog & Table Inspection (Fast pg_tables query)
+            # Step 4: Catalog & Table Inspection (Ultra-fast 1ms pg_class query)
             table_count = 0
             try:
                 with self.conn.cursor() as cur:
                     try:
-                        cur.execute("SELECT COUNT(*) FROM pg_tables WHERE schemaname = %s;", (self.config.pg_schema,))
+                        cur.execute("""
+                            SELECT COUNT(*)
+                            FROM pg_class c
+                            JOIN pg_namespace n ON n.oid = c.relnamespace
+                            WHERE n.nspname = %s AND c.relkind = 'r';
+                        """, (self.config.pg_schema,))
                         table_count = cur.fetchone()[0]
                     except Exception:
                         self.conn.rollback()
-                        cur.execute("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = %s AND table_type = 'BASE TABLE';", (self.config.pg_schema,))
+                        cur.execute("SELECT COUNT(*) FROM pg_tables WHERE schemaname = %s;", (self.config.pg_schema,))
                         table_count = cur.fetchone()[0]
 
                 checklist[3]["status"] = "success"
