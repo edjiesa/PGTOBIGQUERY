@@ -208,50 +208,64 @@ def list_tables(background_tasks: BackgroundTasks):
 
 
 @web_app.get("/api/table-batches")
-def get_table_batches(batch_size: int = 100):
+def get_table_batches(background_tasks: BackgroundTasks, batch_size: int = 100):
     """
     Groups all PostgreSQL tables into batches of N tables (default 100 per batch),
     sorted ascending by row count (from smallest tables with 0 rows to largest).
+    Runs in background to prevent reverse proxy 504 timeouts.
     """
-    try:
-        extractor = PostgresExtractor(config)
-        tables = extractor.get_all_tables_metadata()
-        extractor.close()
+    job_id = "table_batches"
+    
+    if job_id in async_jobs and async_jobs[job_id].get("status") == "completed":
+        return async_jobs[job_id]["result"]
 
-        # Sort tables by row_count ASCENDING (smallest to largest)
-        tables_sorted = sorted(tables, key=lambda x: x.get("row_count", 0))
+    async_jobs[job_id] = {"status": "running", "message": "Grouping tables into batches in background..."}
 
-        batches = []
-        chunk_size = max(1, batch_size)
-        total_tables = len(tables_sorted)
+    def run_bg_batches():
+        try:
+            extractor = PostgresExtractor(config)
+            tables = extractor.get_all_tables_metadata()
+            extractor.close()
 
-        for idx, i in enumerate(range(0, total_tables, chunk_size), start=1):
-            chunk = tables_sorted[i:i + chunk_size]
-            min_rows = chunk[0]["row_count"] if chunk else 0
-            max_rows = chunk[-1]["row_count"] if chunk else 0
-            total_rows_chunk = sum(t["row_count"] for t in chunk)
-            batch_tables = [t["table_name"] for t in chunk]
+            tables_sorted = sorted(tables, key=lambda x: x.get("row_count", 0))
+            batches = []
+            chunk_size = max(1, batch_size)
+            total_tables = len(tables_sorted)
 
-            batches.append({
-                "batch_index": idx,
-                "batch_name": f"Kelompok #{idx} ({len(chunk)} Tabel)",
-                "table_count": len(chunk),
-                "min_rows": min_rows,
-                "max_rows": max_rows,
-                "total_rows": total_rows_chunk,
-                "tables": batch_tables,
-                "table_details": chunk
-            })
+            for idx, i in enumerate(range(0, total_tables, chunk_size), start=1):
+                chunk = tables_sorted[i:i + chunk_size]
+                min_rows = chunk[0]["row_count"] if chunk else 0
+                max_rows = chunk[-1]["row_count"] if chunk else 0
+                total_rows_chunk = sum(t["row_count"] for t in chunk)
+                batch_tables = [t["table_name"] for t in chunk]
 
-        return {
-            "status": "success",
-            "total_tables": total_tables,
-            "total_batches": len(batches),
-            "batch_table_size": chunk_size,
-            "batches": batches
-        }
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
+                batches.append({
+                    "batch_index": idx,
+                    "batch_name": f"Kelompok #{idx} ({len(chunk)} Tabel)",
+                    "table_count": len(chunk),
+                    "min_rows": min_rows,
+                    "max_rows": max_rows,
+                    "total_rows": total_rows_chunk,
+                    "tables": batch_tables,
+                    "table_details": chunk
+                })
+
+            res = {
+                "status": "success",
+                "total_tables": total_tables,
+                "total_batches": len(batches),
+                "batch_table_size": chunk_size,
+                "batches": batches
+            }
+            async_jobs[job_id] = {"status": "completed", "result": res}
+            asyncio.run(broadcast_ws_message({"type": "batches_created", "count": len(batches)}))
+        except Exception as e:
+            res = {"status": "error", "message": str(e)}
+            async_jobs[job_id] = {"status": "failed", "result": res, "error": str(e)}
+
+    background_tasks.add_task(run_bg_batches)
+    return {"status": "started", "job_id": job_id, "message": "Grouping tables in background."}
+
 
 
 @web_app.post("/api/migrate")
