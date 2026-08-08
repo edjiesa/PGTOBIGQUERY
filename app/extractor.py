@@ -1,3 +1,4 @@
+import socket
 import logging
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -22,10 +23,9 @@ class PostgresExtractor:
                 password=self.config.pg_password,
                 dbname=self.config.pg_database,
                 sslmode=self.config.pg_sslmode,
-                connect_timeout=10
+                connect_timeout=3
             )
             logger.info(f"Connected to PostgreSQL at {self.config.pg_host}:{self.config.pg_port}/{self.config.pg_database} (sslmode={self.config.pg_sslmode})")
-
 
     def close(self):
         """Closes PostgreSQL database connection."""
@@ -36,7 +36,7 @@ class PostgresExtractor:
     def test_connection(self) -> Dict[str, Any]:
         """
         Performs Airbyte-style step-by-step connection diagnostics for PostgreSQL 10.4.
-        Returns a detailed checklist of connection tests.
+        Fast fail-fast check in <3 seconds to avoid OpenResty 504 Gateway Time-outs.
         """
         checklist = [
             {"step": "tcp_handshake", "name": "PostgreSQL Host Reachable", "status": "pending", "detail": ""},
@@ -45,11 +45,24 @@ class PostgresExtractor:
             {"step": "catalog_permission", "name": "Schema & Table Inspection", "status": "pending", "detail": ""}
         ]
 
+        # Step 1: Fast TCP Handshake Check (3s Timeout)
+        try:
+            sock = socket.create_connection((self.config.pg_host, self.config.pg_port), timeout=3.0)
+            sock.close()
+            checklist[0]["status"] = "success"
+            checklist[0]["detail"] = f"Reachable {self.config.pg_host}:{self.config.pg_port}"
+        except Exception as socket_err:
+            checklist[0]["status"] = "failed"
+            checklist[0]["detail"] = f"Host '{self.config.pg_host}:{self.config.pg_port}' is unreachable ({socket_err}). Check IP address, port, firewall rules, or VPN."
+            return {
+                "status": "failed",
+                "message": f"PostgreSQL host unreachable: {socket_err}",
+                "checklist": checklist
+            }
+
+        # Step 2 & 3: Authentication & Version Check
         try:
             self.connect()
-            checklist[0]["status"] = "success"
-            checklist[0]["detail"] = f"Connected to {self.config.pg_host}:{self.config.pg_port}"
-
             checklist[1]["status"] = "success"
             checklist[1]["detail"] = f"Authenticated as user '{self.config.pg_user}' on db '{self.config.pg_database}'"
 
@@ -72,13 +85,14 @@ class PostgresExtractor:
                 "checklist": checklist
             }
         except Exception as e:
-            checklist[0]["status"] = "failed"
-            checklist[0]["detail"] = str(e)
+            checklist[1]["status"] = "failed"
+            checklist[1]["detail"] = f"Authentication/Connection Error: {str(e)}"
             return {
                 "status": "failed",
                 "message": f"PostgreSQL connection failed: {str(e)}",
                 "checklist": checklist
             }
+
 
 
     def get_tables(self, schema: str = None) -> List[str]:
