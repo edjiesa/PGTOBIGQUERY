@@ -36,6 +36,7 @@ class ConfigUpdateModel(BaseModel):
     pg_password: str
     pg_database: str
     pg_schema: str = "public"
+    pg_sslmode: str = "prefer"
     gcp_project_id: str
     bigquery_dataset_id: str
     gcp_sa_key_json: Optional[str] = None
@@ -77,6 +78,7 @@ async def get_config():
         "pg_user": config.pg_user,
         "pg_database": config.pg_database,
         "pg_schema": config.pg_schema,
+        "pg_sslmode": config.pg_sslmode,
         "gcp_project_id": config.gcp_project_id,
         "bigquery_dataset_id": config.bigquery_dataset_id,
         "gcp_sa_key_json": config.gcp_sa_key_json,
@@ -95,13 +97,15 @@ async def update_config(data: ConfigUpdateModel):
         pg_password=data.pg_password,
         pg_database=data.pg_database,
         pg_schema=data.pg_schema,
+        pg_sslmode=data.pg_sslmode,
         gcp_project_id=data.gcp_project_id,
         bigquery_dataset_id=data.bigquery_dataset_id,
         gcp_sa_key_json=data.gcp_sa_key_json if data.gcp_sa_key_json and data.gcp_sa_key_json.strip() else None,
         batch_size=data.batch_size,
         write_disposition=data.write_disposition
     )
-    return {"status": "updated", "message": "Configuration & Service Account Key updated successfully."}
+    return {"status": "updated", "message": "Configuration & Remote Profile updated successfully."}
+
 
 
 @web_app.post("/api/test-postgres")

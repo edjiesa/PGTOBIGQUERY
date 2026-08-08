@@ -162,7 +162,7 @@
       font-family: 'JetBrains Mono', monospace;
       font-size: 0.8rem;
       resize: vertical;
-      min-height: 120px;
+      min-height: 110px;
     }
 
     .form-row {
@@ -342,8 +342,8 @@
   <div class="container">
     <header>
       <div class="logo-area">
-        <h1>🚀 PostgreSQL 10.4 ➔ BigQuery</h1>
-        <p>Airbyte-Style Integration & Docker Data Migration Engine</p>
+        <h1>🌐 Multi-Remote PostgreSQL ➔ BigQuery</h1>
+        <p>Airbyte-Style Integration & Standalone Remote Database Migration Engine</p>
       </div>
       <div class="status-badge">
         <div class="dot"></div>
@@ -355,15 +355,31 @@
       <!-- Connection & Credentials Config Panel -->
       <div class="card">
         <div class="card-header">
-          <div class="card-title">⚙️ PostgreSQL & BigQuery Credentials</div>
+          <div class="card-title">🌐 Remote PostgreSQL & BigQuery Config</div>
           <button class="btn btn-secondary" onclick="saveConfig()">Simpan Config</button>
         </div>
 
+        <!-- Remote Connection Profile Selector -->
+        <div class="form-group" style="background: rgba(0, 242, 254, 0.05); border: 1px solid rgba(0, 242, 254, 0.2); padding: 0.85rem; border-radius: 10px; margin-bottom: 1.25rem;">
+          <label style="color: var(--primary-cyan); font-weight: 700;">📡 Remote Connection Profile</label>
+          <div style="display: flex; gap: 0.5rem; margin-top: 0.35rem;">
+            <select id="profileSelect" class="form-control" onchange="loadSelectedProfile()">
+              <option value="default">-- Default / Environment Config --</option>
+            </select>
+            <button type="button" class="btn btn-secondary" style="padding: 0.5rem 0.75rem;" onclick="saveCurrentProfile()">💾 Save Profile</button>
+            <button type="button" class="btn btn-secondary" style="padding: 0.5rem 0.75rem; color: var(--error);" onclick="deleteCurrentProfile()">🗑️</button>
+          </div>
+        </div>
+
         <form id="configForm">
-          <h4 style="color: var(--primary-cyan); font-size: 0.85rem; margin-bottom: 0.75rem;">PostgreSQL 10.4 Source</h4>
+          <h4 style="color: var(--primary-cyan); font-size: 0.85rem; margin-bottom: 0.75rem;">Remote PostgreSQL 10.4+ Connection</h4>
+          <div class="form-group">
+            <label>Profile Name (e.g. AWS RDS Prod, Cloud SQL Staging)</label>
+            <input type="text" id="profile_name" class="form-control" placeholder="Default Profile">
+          </div>
           <div class="form-row">
             <div class="form-group">
-              <label>Host</label>
+              <label>Remote Host / IP (e.g. 192.168.1.50, host.docker.internal)</label>
               <input type="text" id="pg_host" class="form-control" value="{{ config.pg_host }}">
             </div>
             <div class="form-group">
@@ -391,9 +407,19 @@
               <input type="text" id="pg_schema" class="form-control" value="{{ config.pg_schema }}">
             </div>
           </div>
+          <div class="form-group">
+            <label>SSL Mode (For Secure Remote Databases)</label>
+            <select id="pg_sslmode" class="form-control">
+              <option value="prefer" {% if config.pg_sslmode == "prefer" %}selected{% endif %}>prefer (Try SSL, fallback to unencrypted)</option>
+              <option value="disable" {% if config.pg_sslmode == "disable" %}selected{% endif %}>disable (No SSL encryption)</option>
+              <option value="require" {% if config.pg_sslmode == "require" %}selected{% endif %}>require (Require SSL connection)</option>
+              <option value="verify-ca" {% if config.pg_sslmode == "verify-ca" %}selected{% endif %}>verify-ca (SSL with CA Certificate)</option>
+              <option value="verify-full" {% if config.pg_sslmode == "verify-full" %}selected{% endif %}>verify-full (Full SSL Host Verification)</option>
+            </select>
+          </div>
 
           <div style="margin-bottom: 1rem; text-align: right;">
-            <button type="button" class="btn btn-airbyte" onclick="testPostgresAirbyte()">🔍 Airbyte Test PostgreSQL</button>
+            <button type="button" class="btn btn-airbyte" onclick="testPostgresAirbyte()">🔍 Airbyte Test Remote PostgreSQL</button>
           </div>
 
           <h4 style="color: var(--accent-magenta); font-size: 0.85rem; margin: 1.5rem 0 0.75rem 0;">Google BigQuery Target & Service Account</h4>
@@ -430,7 +456,7 @@
         <!-- Airbyte Postgres Diagnostic Card -->
         <div id="pgAirbyteCard" class="card" style="margin-bottom: 1.5rem; display: none;">
           <div class="airbyte-header">
-            <span>🔍 PostgreSQL Diagnostic Checklist</span>
+            <span>🔍 Remote PostgreSQL Diagnostic Checklist</span>
             <span id="pgBadge" class="status-badge" style="padding: 0.2rem 0.6rem;">Testing...</span>
           </div>
           <ul id="pgChecklist" class="airbyte-checklist"></ul>
@@ -448,19 +474,19 @@
         <!-- Table Selector & Migration Action -->
         <div class="card">
           <div class="card-header">
-            <div class="card-title">📦 PostgreSQL Tables</div>
-            <button class="btn btn-secondary" onclick="loadTables()">Muat Tabel</button>
+            <div class="card-title">📦 Remote PostgreSQL Tables</div>
+            <button class="btn btn-secondary" onclick="loadTables()">Muat Tabel Remote</button>
           </div>
 
           <div id="tableContainer" class="table-list">
             <div style="text-align: center; padding: 2rem; color: var(--text-muted);">
-              Klik "Muat Tabel" untuk melihat tabel PostgreSQL.
+              Klik "Muat Tabel Remote" untuk melihat daftar tabel.
             </div>
           </div>
 
           <div style="margin-top: 1.5rem; display: flex; gap: 1rem;">
             <button class="btn btn-secondary" onclick="startMigration(true)">Dry Run (Uji Skema)</button>
-            <button class="btn btn-primary" style="flex: 1;" onclick="startMigration(false)">⚡ Jalankan Migrasi</button>
+            <button class="btn btn-primary" style="flex: 1;" onclick="startMigration(false)">⚡ Jalankan Migrasi Remote</button>
           </div>
         </div>
       </div>
@@ -478,7 +504,7 @@
       </div>
 
       <div id="logTerminal" class="log-terminal">
-        <div class="log-entry info">[SYSTEM] Airbyte-style Dashboard initialized. Input credentials and run connection test.</div>
+        <div class="log-entry info">[SYSTEM] Remote PostgreSQL to BigQuery Migration Hub online.</div>
       </div>
     </div>
   </div>
@@ -530,10 +556,82 @@
         const reader = new FileReader();
         reader.onload = (e) => {
           document.getElementById('gcp_sa_key_json').value = e.target.result;
-          appendLog(`✓ Uploded JSON Key file: ${file.name}`, 'success');
+          appendLog(`✓ Uploaded JSON Key file: ${file.name}`, 'success');
         };
         reader.readAsText(file);
       }
+    }
+
+    // Remote Profiles Management via LocalStorage
+    function getProfiles() {
+      return JSON.parse(localStorage.getItem('pg_remote_profiles') || '{}');
+    }
+
+    function renderProfilesDropdown() {
+      const profiles = getProfiles();
+      const sel = document.getElementById('profileSelect');
+      sel.innerHTML = '<option value="default">-- Default / Environment Config --</option>';
+      for (const name in profiles) {
+        const opt = document.createElement('option');
+        opt.value = name;
+        opt.textContent = `${name} (${profiles[name].pg_host}:${profiles[name].pg_port}/${profiles[name].pg_database})`;
+        sel.appendChild(opt);
+      }
+    }
+
+    function saveCurrentProfile() {
+      const name = document.getElementById('profile_name').value.trim() || `Profile-${Date.now()}`;
+      const profiles = getProfiles();
+
+      profiles[name] = {
+        name: name,
+        pg_host: document.getElementById('pg_host').value,
+        pg_port: parseInt(document.getElementById('pg_port').value),
+        pg_user: document.getElementById('pg_user').value,
+        pg_password: document.getElementById('pg_password').value,
+        pg_database: document.getElementById('pg_database').value,
+        pg_schema: document.getElementById('pg_schema').value,
+        pg_sslmode: document.getElementById('pg_sslmode').value,
+        gcp_project_id: document.getElementById('gcp_project_id').value,
+        bigquery_dataset_id: document.getElementById('bigquery_dataset_id').value,
+        gcp_sa_key_json: document.getElementById('gcp_sa_key_json').value
+      };
+
+      localStorage.setItem('pg_remote_profiles', JSON.stringify(profiles));
+      renderProfilesDropdown();
+      document.getElementById('profileSelect').value = name;
+      appendLog(`✓ Remote profile '${name}' tersimpan di LocalStorage!`, 'success');
+    }
+
+    function loadSelectedProfile() {
+      const name = document.getElementById('profileSelect').value;
+      if (name === 'default') return;
+      const profiles = getProfiles();
+      const p = profiles[name];
+      if (p) {
+        document.getElementById('profile_name').value = p.name;
+        document.getElementById('pg_host').value = p.pg_host;
+        document.getElementById('pg_port').value = p.pg_port;
+        document.getElementById('pg_user').value = p.pg_user;
+        document.getElementById('pg_password').value = p.pg_password;
+        document.getElementById('pg_database').value = p.pg_database;
+        document.getElementById('pg_schema').value = p.pg_schema;
+        document.getElementById('pg_sslmode').value = p.pg_sslmode || 'prefer';
+        document.getElementById('gcp_project_id').value = p.gcp_project_id;
+        document.getElementById('bigquery_dataset_id').value = p.bigquery_dataset_id;
+        document.getElementById('gcp_sa_key_json').value = p.gcp_sa_key_json || '';
+        appendLog(`✓ Profile '${name}' dimuat.`, 'info');
+      }
+    }
+
+    function deleteCurrentProfile() {
+      const name = document.getElementById('profileSelect').value;
+      if (name === 'default') return;
+      const profiles = getProfiles();
+      delete profiles[name];
+      localStorage.setItem('pg_remote_profiles', JSON.stringify(profiles));
+      renderProfilesDropdown();
+      appendLog(`✓ Profile '${name}' telah dihapus.`, 'info');
     }
 
     async function saveConfig() {
@@ -544,6 +642,7 @@
         pg_password: document.getElementById('pg_password').value,
         pg_database: document.getElementById('pg_database').value,
         pg_schema: document.getElementById('pg_schema').value,
+        pg_sslmode: document.getElementById('pg_sslmode').value,
         gcp_project_id: document.getElementById('gcp_project_id').value,
         bigquery_dataset_id: document.getElementById('bigquery_dataset_id').value,
         gcp_sa_key_json: document.getElementById('gcp_sa_key_json').value
@@ -556,7 +655,7 @@
           body: JSON.stringify(payload)
         });
         const data = await res.json();
-        appendLog('✓ Konfigurasi & Service Account JSON Key tersimpan.', 'success');
+        appendLog('✓ Konfigurasi & Remote Connection tersimpan ke server.', 'success');
       } catch (err) {
         appendLog(`Error save config: ${err}`, 'error');
       }
@@ -597,12 +696,12 @@
           badge.innerText = 'CONNECTED';
           badge.style.color = '#10b981';
           badge.style.borderColor = 'rgba(16, 185, 129, 0.4)';
-          appendLog(`✓ PostgreSQL Airbyte Connection Test PASSED (${data.table_count} tables found)`, 'success');
+          appendLog(`✓ Remote PostgreSQL Airbyte Test PASSED (${data.table_count} tables found)`, 'success');
         } else {
           badge.innerText = 'FAILED';
           badge.style.color = '#ef4444';
           badge.style.borderColor = 'rgba(239, 68, 68, 0.4)';
-          appendLog(`✗ PostgreSQL Connection Test FAILED: ${data.message}`, 'error');
+          appendLog(`✗ Remote PostgreSQL Test FAILED: ${data.message}`, 'error');
         }
       } catch (err) {
         appendLog(`Error testing PostgreSQL: ${err}`, 'error');
@@ -657,7 +756,8 @@
     }
 
     async function loadTables() {
-      appendLog('Mengambil daftar tabel dari PostgreSQL...', 'info');
+      await saveConfig();
+      appendLog('Mengambil daftar tabel dari Remote PostgreSQL...', 'info');
       try {
         const res = await fetch('/api/tables');
         const data = await res.json();
@@ -676,7 +776,7 @@
               </div>
             `;
           });
-          appendLog(`Berhasil memuat ${data.tables.length} tabel.`, 'success');
+          appendLog(`Berhasil memuat ${data.tables.length} tabel dari remote database.`, 'success');
         } else {
           appendLog(`Gagal memuat tabel: ${data.message}`, 'error');
         }
@@ -687,7 +787,7 @@
 
     async function startMigration(dryRun = false) {
       await saveConfig();
-      appendLog(`Memulai proses migrasi (Dry Run: ${dryRun})...`, 'info');
+      appendLog(`Memulai proses migrasi remote (Dry Run: ${dryRun})...`, 'info');
       try {
         const res = await fetch('/api/migrate', {
           method: 'POST',
@@ -703,6 +803,7 @@
 
     window.onload = () => {
       initWS();
+      renderProfilesDropdown();
     };
   </script>
 </body>

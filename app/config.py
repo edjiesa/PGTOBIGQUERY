@@ -18,6 +18,7 @@ class MigrationConfig(BaseSettings):
     pg_password: str = Field(default="postgres", alias="PG_PASSWORD")
     pg_database: str = Field(default="postgres", alias="PG_DATABASE")
     pg_schema: str = Field(default="public", alias="PG_SCHEMA")
+    pg_sslmode: str = Field(default="prefer", alias="PG_SSLMODE")
 
     # BigQuery Settings
     gcp_project_id: Optional[str] = Field(default=None, alias="GCP_PROJECT_ID")
@@ -38,14 +39,15 @@ class MigrationConfig(BaseSettings):
     web_port: int = Field(default=8000, alias="WEB_PORT")
 
     def get_pg_connection_string(self) -> str:
-        """Returns standard PostgreSQL connection URI string."""
-        return f"postgresql://{self.pg_user}:{self.pg_password}@{self.pg_host}:{self.pg_port}/{self.pg_database}"
+        """Returns standard PostgreSQL connection URI string with sslmode."""
+        return f"postgresql://{self.pg_user}:{self.pg_password}@{self.pg_host}:{self.pg_port}/{self.pg_database}?sslmode={self.pg_sslmode}"
 
     def update_settings(self, **kwargs):
         """Dynamically update settings fields at runtime."""
         for key, value in kwargs.items():
             if hasattr(self, key) and value is not None:
                 setattr(self, key, value)
+
 
 
 # Single instance singleton loader

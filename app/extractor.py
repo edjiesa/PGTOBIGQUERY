@@ -13,7 +13,7 @@ class PostgresExtractor:
         self.conn = None
 
     def connect(self):
-        """Establishes database connection to PostgreSQL 10.4."""
+        """Establishes database connection to PostgreSQL 10.4 (Remote or Local)."""
         if self.conn is None or self.conn.closed:
             self.conn = psycopg2.connect(
                 host=self.config.pg_host,
@@ -21,9 +21,11 @@ class PostgresExtractor:
                 user=self.config.pg_user,
                 password=self.config.pg_password,
                 dbname=self.config.pg_database,
+                sslmode=self.config.pg_sslmode,
                 connect_timeout=10
             )
-            logger.info(f"Connected to PostgreSQL at {self.config.pg_host}:{self.config.pg_port}/{self.config.pg_database}")
+            logger.info(f"Connected to PostgreSQL at {self.config.pg_host}:{self.config.pg_port}/{self.config.pg_database} (sslmode={self.config.pg_sslmode})")
+
 
     def close(self):
         """Closes PostgreSQL database connection."""

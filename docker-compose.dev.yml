@@ -1,0 +1,34 @@
+version: '3.8'
+
+# Development Docker Compose file with local PostgreSQL 10.4 test container
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+
+services:
+  postgres10:
+    image: postgres:10.4-alpine
+    container_name: pg10_source_dev
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+      POSTGRES_DB: sample_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./init_pg10_sample.sql:/docker-entrypoint-initdb.d/init_pg10_sample.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  pgtobigquery:
+    environment:
+      PG_HOST: postgres10
+      PG_PORT: 5432
+      PG_USER: postgres
+      PG_PASSWORD: postgrespassword
+      PG_DATABASE: sample_db
+    depends_on:
+      postgres10:
+        condition: service_healthy

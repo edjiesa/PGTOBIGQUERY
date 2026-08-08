@@ -1,26 +1,8 @@
 version: '3.8'
 
 services:
-  # PostgreSQL 10.4 Container loaded with sample data
-  postgres10:
-    image: postgres:10.4-alpine
-    container_name: pg10_source
-    restart: always
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgrespassword
-      POSTGRES_DB: sample_db
-    ports:
-      - "5432:5432"
-    volumes:
-      - ./init_pg10_sample.sql:/docker-entrypoint-initdb.d/init_pg10_sample.sql
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
-  # PostgreSQL to BigQuery Migration App Container
+  # Standalone PostgreSQL to BigQuery Migration App Container
+  # Connects directly to ANY remote PostgreSQL server (RDS, Cloud SQL, Azure, On-premise, or host.docker.internal)
   pgtobigquery:
     build:
       context: .
@@ -29,23 +11,23 @@ services:
     restart: on-failure
     ports:
       - "8000:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
-      PG_HOST: postgres10
-      PG_PORT: 5432
-      PG_USER: postgres
-      PG_PASSWORD: postgrespassword
-      PG_DATABASE: sample_db
-      PG_SCHEMA: public
+      PG_HOST: ${PG_HOST:-host.docker.internal}
+      PG_PORT: ${PG_PORT:-5432}
+      PG_USER: ${PG_USER:-postgres}
+      PG_PASSWORD: ${PG_PASSWORD:-postgres}
+      PG_DATABASE: ${PG_DATABASE:-postgres}
+      PG_SCHEMA: ${PG_SCHEMA:-public}
+      PG_SSLMODE: ${PG_SSLMODE:-prefer}
       GCP_PROJECT_ID: ${GCP_PROJECT_ID:-your-gcp-project-id}
-      BIGQUERY_DATASET_ID: ${BIGQUERY_DATASET_ID:-pg10_migrated_db}
+      BIGQUERY_DATASET_ID: ${BIGQUERY_DATASET_ID:-pg_remote_migrated_db}
       GCP_CREDENTIALS_FILE: /app/gcp-credentials.json
       BATCH_SIZE: 50000
       WEB_HOST: "0.0.0.0"
       WEB_PORT: 8000
     volumes:
       - ./.env:/app/.env:ro
-      # Volume mount your GCP Service Account JSON key
+      # Optional: Volume mount your GCP Service Account JSON key if not passing via Web UI
       - ./gcp-service-account.json:/app/gcp-credentials.json:ro
-    depends_on:
-      postgres10:
-        condition: service_healthy
