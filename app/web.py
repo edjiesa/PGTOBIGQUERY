@@ -15,8 +15,10 @@ from app.config import config, MigrationConfig
 from app.extractor import PostgresExtractor
 from app.loader import BigQueryLoader
 from app.migrator import DatabaseMigrator
+from app.state import state_manager
 
 logger = logging.getLogger("pgtobigquery.web")
+
 
 main_event_loop: Optional[asyncio.AbstractEventLoop] = None
 
@@ -204,9 +206,11 @@ def test_connections():
 @web_app.get("/api/tables")
 def list_tables(background_tasks: BackgroundTasks):
     """Fetches PostgreSQL tables and metadata in background (Optimized for 1000+ slow tables)."""
+    cached_tables = state_manager.load_tables()
+    if cached_tables:
+        return {"status": "success", "tables": cached_tables}
+
     job_id = "load_tables"
-    
-    # If job is already completed recently, return result immediately
     if job_id in async_jobs and async_jobs[job_id].get("status") == "completed":
         return async_jobs[job_id]["result"]
 
@@ -217,6 +221,7 @@ def list_tables(background_tasks: BackgroundTasks):
             extractor = PostgresExtractor(config)
             tables = extractor.get_all_tables_metadata()
             extractor.close()
+            state_manager.save_tables(tables)
             res = {"status": "success", "tables": tables}
             async_jobs[job_id] = {"status": "completed", "result": res}
             safe_ws_broadcast({"type": "tables_loaded", "count": len(tables)})
@@ -229,10 +234,6 @@ def list_tables(background_tasks: BackgroundTasks):
     return {"status": "started", "job_id": job_id, "message": "Loading table catalog in background."}
 
 
-
-
-
-
 @web_app.get("/api/table-batches")
 def get_table_batches(background_tasks: BackgroundTasks, batch_size: int = 100):
     """
@@ -240,8 +241,18 @@ def get_table_batches(background_tasks: BackgroundTasks, batch_size: int = 100):
     sorted ascending by row count (from smallest tables with 0 rows to largest).
     Runs in background to prevent reverse proxy 504 timeouts.
     """
+    cached_batches = state_manager.load_batches()
+    if cached_batches:
+        cached_tables = state_manager.load_tables() or []
+        return {
+            "status": "success",
+            "total_tables": len(cached_tables),
+            "total_batches": len(cached_batches),
+            "batch_table_size": batch_size,
+            "batches": cached_batches
+        }
+
     job_id = "table_batches"
-    
     if job_id in async_jobs and async_jobs[job_id].get("status") == "completed":
         return async_jobs[job_id]["result"]
 
@@ -249,9 +260,12 @@ def get_table_batches(background_tasks: BackgroundTasks, batch_size: int = 100):
 
     def run_bg_batches():
         try:
-            extractor = PostgresExtractor(config)
-            tables = extractor.get_all_tables_metadata()
-            extractor.close()
+            tables = state_manager.load_tables()
+            if not tables:
+                extractor = PostgresExtractor(config)
+                tables = extractor.get_all_tables_metadata()
+                extractor.close()
+                state_manager.save_tables(tables)
 
             tables_sorted = sorted(tables, key=lambda x: x.get("row_count", 0))
             batches = []
@@ -273,9 +287,12 @@ def get_table_batches(background_tasks: BackgroundTasks, batch_size: int = 100):
                     "max_rows": max_rows,
                     "total_rows": total_rows_chunk,
                     "tables": batch_tables,
+                    "completed_tables": [],
+                    "status": "PENDING",
                     "table_details": chunk
                 })
 
+            state_manager.save_batches(batches)
             res = {
                 "status": "success",
                 "total_tables": total_tables,
@@ -293,13 +310,20 @@ def get_table_batches(background_tasks: BackgroundTasks, batch_size: int = 100):
     return {"status": "started", "job_id": job_id, "message": "Grouping tables in background."}
 
 
-
 @web_app.post("/api/migrate")
 async def start_migration(req: MigrationRequestModel, background_tasks: BackgroundTasks):
     """Starts migration task in background using thread-safe event loop dispatch."""
     def run_bg_migration():
         def ws_callback(event):
             safe_ws_broadcast(event)
+            if isinstance(event, dict) and event.get("event") == "table_success":
+                data = event.get("data", {})
+                if "table_name" in data:
+                    state_manager.update_table_status_in_batches(
+                        data["table_name"],
+                        status="COMPLETED",
+                        rows_migrated=data.get("bigquery_rows", 0)
+                    )
 
         try:
             migrator = DatabaseMigrator(config)
@@ -333,3 +357,4 @@ async def websocket_logs(websocket: WebSocket):
     except WebSocketDisconnect:
         if websocket in active_websockets:
             active_websockets.remove(websocket)
+

@@ -25,9 +25,16 @@ services:
       BIGQUERY_DATASET_ID: ${BIGQUERY_DATASET_ID:-pg_remote_migrated_db}
       GCP_CREDENTIALS_FILE: /app/gcp-credentials.json
       BATCH_SIZE: 50000
+      DATA_DIR: /app/data
       WEB_HOST: "0.0.0.0"
       WEB_PORT: 8000
     volumes:
       - ./.env:/app/.env:ro
       # Optional: Volume mount your GCP Service Account JSON key if not passing via Web UI
       - ./gcp-service-account.json:/app/gcp-credentials.json:ro
+      - pg_data_store:/app/data
+
+volumes:
+  pg_data_store:
+    driver: local
+
