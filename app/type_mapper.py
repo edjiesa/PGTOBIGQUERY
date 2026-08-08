@@ -102,38 +102,81 @@ def postgres_to_pyarrow_field(col_name: str, pg_type: str, is_nullable: bool = T
 def convert_value_for_pyarrow(val: Any, bq_type: str, mode: str) -> Any:
     """
     Sanitizes raw PostgreSQL cell values into PyArrow / Parquet compatible representations.
+    Safely handles timestamps, dates, numerics, bytea, json, and exotic types without crashing PyArrow.
     """
     if val is None:
         return None
 
-    if mode == "REPEATED":
-        if isinstance(val, (list, tuple)):
-            return [str(item) if not isinstance(item, (int, float, bool)) else item for item in val]
-        return [str(val)]
+    try:
+        if mode == "REPEATED":
+            if isinstance(val, (list, tuple)):
+                return [str(item) if not isinstance(item, (int, float, bool)) else item for item in val]
+            return [str(val)]
 
-    if bq_type == "JSON":
-        if isinstance(val, (dict, list)):
-            return json.dumps(val)
+        if bq_type == "JSON":
+            if isinstance(val, (dict, list)):
+                return json.dumps(val, default=str)
+            return str(val)
+
+        if bq_type in ("DATETIME", "TIMESTAMP"):
+            if isinstance(val, datetime.datetime):
+                return val
+            if isinstance(val, datetime.date):
+                return datetime.datetime.combine(val, datetime.time.min)
+            val_str = str(val).strip()
+            if not val_str or val_str.startswith("0000"):
+                return None
+            try:
+                return datetime.datetime.fromisoformat(val_str.replace("Z", "+00:00"))
+            except Exception:
+                return None
+
+        if bq_type == "DATE":
+            if isinstance(val, datetime.date):
+                return val
+            if isinstance(val, datetime.datetime):
+                return val.date()
+            val_str = str(val).strip()
+            if not val_str or val_str.startswith("0000"):
+                return None
+            try:
+                return datetime.date.fromisoformat(val_str)
+            except Exception:
+                return None
+
+        if bq_type == "TIME":
+            return str(val)
+
+        if bq_type == "NUMERIC" or bq_type == "FLOAT64":
+            if isinstance(val, (int, float)):
+                return val
+            val_str = str(val).replace("$", "").replace(",", "").strip()
+            try:
+                return float(val_str) if bq_type == "FLOAT64" else val_str
+            except Exception:
+                return None
+
+        if bq_type == "INT64":
+            if isinstance(val, int):
+                return val
+            try:
+                return int(float(str(val).strip()))
+            except Exception:
+                return None
+
+        if bq_type == "BOOL":
+            if isinstance(val, bool):
+                return val
+            return str(val).lower() in ("true", "1", "t", "yes", "y")
+
+        if bq_type == "BYTES":
+            if isinstance(val, memoryview):
+                return bytes(val)
+            if isinstance(val, bytes):
+                return val
+            return str(val).encode('utf-8')
+
         return str(val)
+    except Exception:
+        return str(val) if bq_type == "STRING" else None
 
-    if bq_type == "DATETIME" or bq_type == "TIMESTAMP":
-        if isinstance(val, datetime.datetime):
-            return val
-        return str(val)
-
-    if bq_type == "DATE":
-        if isinstance(val, datetime.date):
-            return val
-        return str(val)
-
-    if bq_type == "TIME":
-        return str(val)
-
-    if bq_type == "BYTES":
-        if isinstance(val, memoryview):
-            return bytes(val)
-        if isinstance(val, bytes):
-            return val
-        return str(val).encode('utf-8')
-
-    return val

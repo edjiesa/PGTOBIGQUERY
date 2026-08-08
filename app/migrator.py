@@ -195,7 +195,11 @@ class DatabaseMigrator:
                     }
                     results["errors"].append(table_err_info)
                     results["table_details"].append(table_err_info)
+                    active_migration_status["tables_processed"] += 1
+                    active_migration_status["last_completed_table"] = table_name
+                    active_migration_status["last_completed_rows"] = 0
                     notify_progress("table_error", table_err_info)
+
 
             # 4. Finish migration run
             results["total_duration_seconds"] = round(time.time() - start_time, 2)
