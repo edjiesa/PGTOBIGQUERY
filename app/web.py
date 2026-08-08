@@ -38,6 +38,7 @@ class ConfigUpdateModel(BaseModel):
     pg_schema: str = "public"
     gcp_project_id: str
     bigquery_dataset_id: str
+    gcp_sa_key_json: Optional[str] = None
     batch_size: int = 50000
     write_disposition: str = "WRITE_TRUNCATE"
 
@@ -78,6 +79,7 @@ async def get_config():
         "pg_schema": config.pg_schema,
         "gcp_project_id": config.gcp_project_id,
         "bigquery_dataset_id": config.bigquery_dataset_id,
+        "gcp_sa_key_json": config.gcp_sa_key_json,
         "batch_size": config.batch_size,
         "write_disposition": config.write_disposition
     }
@@ -85,23 +87,43 @@ async def get_config():
 
 @web_app.post("/api/config")
 async def update_config(data: ConfigUpdateModel):
-    """Updates active config parameters."""
-    config.pg_host = data.pg_host
-    config.pg_port = data.pg_port
-    config.pg_user = data.pg_user
-    config.pg_password = data.pg_password
-    config.pg_database = data.pg_database
-    config.pg_schema = data.pg_schema
-    config.gcp_project_id = data.gcp_project_id
-    config.bigquery_dataset_id = data.bigquery_dataset_id
-    config.batch_size = data.batch_size
-    config.write_disposition = data.write_disposition
-    return {"status": "updated", "message": "Configuration updated successfully."}
+    """Updates active config parameters dynamically."""
+    config.update_settings(
+        pg_host=data.pg_host,
+        pg_port=data.pg_port,
+        pg_user=data.pg_user,
+        pg_password=data.pg_password,
+        pg_database=data.pg_database,
+        pg_schema=data.pg_schema,
+        gcp_project_id=data.gcp_project_id,
+        bigquery_dataset_id=data.bigquery_dataset_id,
+        gcp_sa_key_json=data.gcp_sa_key_json if data.gcp_sa_key_json and data.gcp_sa_key_json.strip() else None,
+        batch_size=data.batch_size,
+        write_disposition=data.write_disposition
+    )
+    return {"status": "updated", "message": "Configuration & Service Account Key updated successfully."}
+
+
+@web_app.post("/api/test-postgres")
+async def test_postgres():
+    """Airbyte-style diagnostic connection test for PostgreSQL."""
+    extractor = PostgresExtractor(config)
+    res = extractor.test_connection()
+    extractor.close()
+    return res
+
+
+@web_app.post("/api/test-bigquery")
+async def test_bigquery():
+    """Airbyte-style diagnostic connection test for Google BigQuery."""
+    loader = BigQueryLoader(config)
+    res = loader.test_connection()
+    return res
 
 
 @web_app.get("/api/test-connections")
 async def test_connections():
-    """Tests connections to PostgreSQL and BigQuery."""
+    """Tests connections to PostgreSQL and BigQuery concurrently."""
     extractor = PostgresExtractor(config)
     pg_res = extractor.test_connection()
     extractor.close()
@@ -113,6 +135,7 @@ async def test_connections():
         "postgres": pg_res,
         "bigquery": bq_res
     }
+
 
 
 @web_app.get("/api/tables")

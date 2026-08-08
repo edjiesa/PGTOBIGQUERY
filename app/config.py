@@ -41,6 +41,12 @@ class MigrationConfig(BaseSettings):
         """Returns standard PostgreSQL connection URI string."""
         return f"postgresql://{self.pg_user}:{self.pg_password}@{self.pg_host}:{self.pg_port}/{self.pg_database}"
 
+    def update_settings(self, **kwargs):
+        """Dynamically update settings fields at runtime."""
+        for key, value in kwargs.items():
+            if hasattr(self, key) and value is not None:
+                setattr(self, key, value)
+
 
 # Single instance singleton loader
 config = MigrationConfig()

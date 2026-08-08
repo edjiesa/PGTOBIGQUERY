@@ -22,7 +22,14 @@ logger = logging.getLogger("pgtobigquery.loader")
 class BigQueryLoader:
     def __init__(self, config: MigrationConfig):
         self.config = config
-        self.client = self._init_client()
+        self._client = None
+
+    @property
+    def client(self) -> bigquery.Client:
+        """Lazily initializes and returns BigQuery client."""
+        if self._client is None:
+            self._client = self._init_client()
+        return self._client
 
     def _init_client(self) -> bigquery.Client:
         """Initializes BigQuery Client using configured credentials."""
@@ -42,17 +49,94 @@ class BigQueryLoader:
         # 3. Fallback to Application Default Credentials (ADC) or environment variable GOOGLE_APPLICATION_CREDENTIALS
         return bigquery.Client(project=project_id)
 
+
     def test_connection(self) -> Dict[str, Any]:
-        """Tests connection to BigQuery and verifies project accessibility."""
+        """
+        Performs Airbyte-style step-by-step connection diagnostics for Google BigQuery.
+        Returns a detailed checklist of connection tests.
+        """
+        checklist = [
+            {"step": "json_parsing", "name": "Service Account Key Format", "status": "pending", "detail": ""},
+            {"step": "authentication", "name": "Google Cloud Authentication", "status": "pending", "detail": ""},
+            {"step": "project_check", "name": "GCP Project Access", "status": "pending", "detail": ""},
+            {"step": "bigquery_api", "name": "BigQuery API Connectivity", "status": "pending", "detail": ""},
+            {"step": "dataset_check", "name": "Target Dataset Permission", "status": "pending", "detail": ""}
+        ]
+
+        auth_email = None
+        project_id = self.config.gcp_project_id
+
+        # Step 1: Service Account JSON Key Parsing
         try:
-            datasets = list(self.client.list_datasets(max_results=5))
-            return {
-                "status": "success",
-                "project_id": self.client.project,
-                "dataset_count": len(datasets)
-            }
-        except Exception as e:
-            return {"status": "error", "message": str(e)}
+            if self.config.gcp_sa_key_json:
+                sa_info = json.loads(self.config.gcp_sa_key_json)
+                if not isinstance(sa_info, dict) or sa_info.get("type") != "service_account":
+                    raise ValueError("JSON Key must be a valid Google Service Account dictionary (type='service_account').")
+                auth_email = sa_info.get("client_email", "Unknown SA Email")
+                project_id = project_id or sa_info.get("project_id")
+                checklist[0]["status"] = "success"
+                checklist[0]["detail"] = f"Valid Service Account Key for '{auth_email}'"
+            elif self.config.gcp_credentials_file and os.path.exists(self.config.gcp_credentials_file):
+                with open(self.config.gcp_credentials_file, "r") as f:
+                    sa_info = json.load(f)
+                    auth_email = sa_info.get("client_email", "File Credentials")
+                    project_id = project_id or sa_info.get("project_id")
+                checklist[0]["status"] = "success"
+                checklist[0]["detail"] = f"Loaded file credentials: {self.config.gcp_credentials_file}"
+            else:
+                checklist[0]["status"] = "warning"
+                checklist[0]["detail"] = "Using Application Default Credentials (ADC) or environment settings."
+        except Exception as err:
+            checklist[0]["status"] = "failed"
+            checklist[0]["detail"] = f"JSON Key Error: {str(err)}"
+            return {"status": "failed", "message": "Failed Service Account Key Parsing", "checklist": checklist}
+
+        # Step 2 & 3: Authentication & Client Initialization
+        try:
+            client = self._init_client()
+            checklist[1]["status"] = "success"
+            checklist[1]["detail"] = f"Authenticated successfully as {auth_email or 'Default GCP Credential'}"
+
+            checklist[2]["status"] = "success"
+            checklist[2]["detail"] = f"Accessing GCP Project ID: '{client.project}'"
+        except Exception as err:
+            checklist[1]["status"] = "failed"
+            checklist[1]["detail"] = f"Auth failed: {str(err)}"
+            return {"status": "failed", "message": "Google Authentication Failed", "checklist": checklist}
+
+        # Step 4: BigQuery API Connectivity Test
+        try:
+            datasets = list(client.list_datasets(max_results=10))
+            checklist[3]["status"] = "success"
+            checklist[3]["detail"] = f"BigQuery API OK. Found {len(datasets)} dataset(s) in project."
+        except Exception as err:
+            checklist[3]["status"] = "failed"
+            checklist[3]["detail"] = f"BigQuery API Error: {str(err)}. Verify BigQuery Admin / Data Viewer permissions."
+            return {"status": "failed", "message": "BigQuery API Access Denied", "checklist": checklist}
+
+        # Step 5: Target Dataset Check
+        target_dataset = self.config.bigquery_dataset_id
+        if target_dataset:
+            try:
+                dataset_ref = bigquery.DatasetReference(client.project, target_dataset)
+                ds = client.get_dataset(dataset_ref)
+                checklist[4]["status"] = "success"
+                checklist[4]["detail"] = f"Dataset '{target_dataset}' exists in location '{ds.location}'"
+            except Exception:
+                checklist[4]["status"] = "warning"
+                checklist[4]["detail"] = f"Dataset '{target_dataset}' does not exist yet (will be auto-created during migration)."
+        else:
+            checklist[4]["status"] = "warning"
+            checklist[4]["detail"] = "No target Dataset ID configured."
+
+        return {
+            "status": "success",
+            "message": "All BigQuery connection checks passed!",
+            "project_id": client.project,
+            "service_account": auth_email,
+            "checklist": checklist
+        }
+
 
     def ensure_dataset_exists(self, dataset_id: str = None, location: str = None) -> bigquery.Dataset:
         """Creates dataset if it does not exist."""

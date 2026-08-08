@@ -32,22 +32,52 @@ class PostgresExtractor:
             logger.info("Closed PostgreSQL database connection.")
 
     def test_connection(self) -> Dict[str, Any]:
-        """Tests PostgreSQL connection and returns version & info."""
+        """
+        Performs Airbyte-style step-by-step connection diagnostics for PostgreSQL 10.4.
+        Returns a detailed checklist of connection tests.
+        """
+        checklist = [
+            {"step": "tcp_handshake", "name": "PostgreSQL Host Reachable", "status": "pending", "detail": ""},
+            {"step": "authentication", "name": "User Authentication", "status": "pending", "detail": ""},
+            {"step": "version_check", "name": "PostgreSQL Version & Catalog", "status": "pending", "detail": ""},
+            {"step": "catalog_permission", "name": "Schema & Table Inspection", "status": "pending", "detail": ""}
+        ]
+
         try:
             self.connect()
+            checklist[0]["status"] = "success"
+            checklist[0]["detail"] = f"Connected to {self.config.pg_host}:{self.config.pg_port}"
+
+            checklist[1]["status"] = "success"
+            checklist[1]["detail"] = f"Authenticated as user '{self.config.pg_user}' on db '{self.config.pg_database}'"
+
             with self.conn.cursor() as cur:
                 cur.execute("SELECT version();")
                 version = cur.fetchone()[0]
-                cur.execute("SELECT current_database(), current_schema();")
-                db, schema = cur.fetchone()
+                checklist[2]["status"] = "success"
+                checklist[2]["detail"] = f"{version.split(',')[0]}"
+
+                tables = self.get_tables()
+                checklist[3]["status"] = "success"
+                checklist[3]["detail"] = f"Schema '{self.config.pg_schema}' contains {len(tables)} base table(s)."
+
             return {
                 "status": "success",
-                "version": version,
-                "database": db,
-                "schema": schema
+                "message": "PostgreSQL connection test succeeded!",
+                "database": self.config.pg_database,
+                "schema": self.config.pg_schema,
+                "table_count": len(tables),
+                "checklist": checklist
             }
         except Exception as e:
-            return {"status": "error", "message": str(e)}
+            checklist[0]["status"] = "failed"
+            checklist[0]["detail"] = str(e)
+            return {
+                "status": "failed",
+                "message": f"PostgreSQL connection failed: {str(e)}",
+                "checklist": checklist
+            }
+
 
     def get_tables(self, schema: str = None) -> List[str]:
         """Retrieves list of user base tables in the specified PostgreSQL schema."""

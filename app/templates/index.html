@@ -10,7 +10,7 @@
   <style>
     :root {
       --bg-dark: #0a0e1a;
-      --card-bg: rgba(18, 26, 47, 0.7);
+      --card-bg: rgba(18, 26, 47, 0.75);
       --card-border: rgba(255, 255, 255, 0.08);
       --primary-cyan: #00f2fe;
       --primary-blue: #4facfe;
@@ -33,8 +33,8 @@
       font-family: 'Plus Jakarta Sans', sans-serif;
       background: var(--bg-dark);
       background-image: 
-        radial-gradient(at 0% 0%, rgba(79, 172, 254, 0.15) 0px, transparent 50%),
-        radial-gradient(at 100% 100%, rgba(127, 83, 172, 0.15) 0px, transparent 50%);
+        radial-gradient(at 0% 0%, rgba(79, 172, 254, 0.12) 0px, transparent 50%),
+        radial-gradient(at 100% 100%, rgba(127, 83, 172, 0.12) 0px, transparent 50%);
       color: var(--text-main);
       min-height: 100vh;
       padding: 2rem;
@@ -158,6 +158,13 @@
       box-shadow: 0 0 0 3px rgba(79, 172, 254, 0.2);
     }
 
+    textarea.form-control {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.8rem;
+      resize: vertical;
+      min-height: 120px;
+    }
+
     .form-row {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -169,10 +176,10 @@
       align-items: center;
       justify-content: center;
       gap: 0.5rem;
-      padding: 0.75rem 1.5rem;
+      padding: 0.75rem 1.25rem;
       border-radius: 10px;
       font-weight: 600;
-      font-size: 0.9rem;
+      font-size: 0.85rem;
       cursor: pointer;
       border: none;
       transition: all 0.25s ease;
@@ -197,6 +204,75 @@
 
     .btn-secondary:hover {
       background: rgba(255, 255, 255, 0.1);
+    }
+
+    .btn-airbyte {
+      background: linear-gradient(135deg, #647eee, #7f53ac);
+      color: #fff;
+    }
+
+    .btn-airbyte:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 15px rgba(100, 126, 238, 0.4);
+    }
+
+    /* Airbyte Diagnostic Checklist Styling */
+    .airbyte-card {
+      background: rgba(10, 14, 26, 0.8);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 1rem;
+      margin-top: 1rem;
+    }
+
+    .airbyte-header {
+      font-size: 0.85rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      margin-bottom: 0.75rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .airbyte-checklist {
+      list-style: none;
+    }
+
+    .airbyte-step {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.75rem;
+      padding: 0.6rem 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+      font-size: 0.85rem;
+    }
+
+    .airbyte-step:last-child {
+      border-bottom: none;
+    }
+
+    .step-icon {
+      font-weight: bold;
+      width: 20px;
+      text-align: center;
+    }
+    .step-icon.success { color: var(--success); }
+    .step-icon.failed { color: var(--error); }
+    .step-icon.warning { color: var(--warning); }
+    .step-icon.pending { color: var(--text-muted); }
+
+    .step-title {
+      font-weight: 600;
+      color: var(--text-main);
+    }
+
+    .step-detail {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      margin-top: 0.15rem;
     }
 
     .table-list {
@@ -249,16 +325,14 @@
       border-radius: 12px;
       padding: 1rem;
       font-family: 'JetBrains Mono', monospace;
-      font-size: 0.85rem;
+      font-size: 0.82rem;
       color: #38edf8;
-      height: 300px;
+      height: 260px;
       overflow-y: auto;
       white-space: pre-wrap;
     }
 
-    .log-entry {
-      margin-bottom: 0.35rem;
-    }
+    .log-entry { margin-bottom: 0.35rem; }
     .log-entry.error { color: var(--error); }
     .log-entry.success { color: var(--success); }
     .log-entry.info { color: var(--primary-blue); }
@@ -269,20 +343,20 @@
     <header>
       <div class="logo-area">
         <h1>🚀 PostgreSQL 10.4 ➔ BigQuery</h1>
-        <p>Direct Docker Data Migration Engine & Schema Mapper</p>
+        <p>Airbyte-Style Integration & Docker Data Migration Engine</p>
       </div>
       <div class="status-badge">
         <div class="dot"></div>
-        System Ready
+        System Online
       </div>
     </header>
 
     <div class="grid-2">
-      <!-- Connection & Config Panel -->
+      <!-- Connection & Credentials Config Panel -->
       <div class="card">
         <div class="card-header">
-          <div class="card-title">⚙️ Konfigurasi Koneksi</div>
-          <button class="btn btn-secondary" onclick="testConnections()">Tes Koneksi</button>
+          <div class="card-title">⚙️ PostgreSQL & BigQuery Credentials</div>
+          <button class="btn btn-secondary" onclick="saveConfig()">Simpan Config</button>
         </div>
 
         <form id="configForm">
@@ -318,7 +392,11 @@
             </div>
           </div>
 
-          <h4 style="color: var(--accent-magenta); font-size: 0.85rem; margin: 1rem 0 0.75rem 0;">Google BigQuery Target</h4>
+          <div style="margin-bottom: 1rem; text-align: right;">
+            <button type="button" class="btn btn-airbyte" onclick="testPostgresAirbyte()">🔍 Airbyte Test PostgreSQL</button>
+          </div>
+
+          <h4 style="color: var(--accent-magenta); font-size: 0.85rem; margin: 1.5rem 0 0.75rem 0;">Google BigQuery Target & Service Account</h4>
           <div class="form-row">
             <div class="form-group">
               <label>GCP Project ID</label>
@@ -330,37 +408,69 @@
             </div>
           </div>
 
-          <div style="margin-top: 1rem; text-align: right;">
-            <button type="button" class="btn btn-secondary" onclick="saveConfig()">Simpan Konfigurasi</button>
+          <div class="form-group">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
+              <label style="margin-bottom: 0;">GCP Service Account JSON Key</label>
+              <div>
+                <input type="file" id="jsonFileInput" accept=".json" style="display:none;" onchange="handleFileUpload(event)">
+                <button type="button" class="btn btn-secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;" onclick="document.getElementById('jsonFileInput').click()">📁 Upload .json</button>
+              </div>
+            </div>
+            <textarea id="gcp_sa_key_json" class="form-control" placeholder='Paste your GCP Service Account JSON Key here... {"type": "service_account", ...}'>{{ config.gcp_sa_key_json or '' }}</textarea>
+          </div>
+
+          <div style="text-align: right; margin-top: 1rem;">
+            <button type="button" class="btn btn-airbyte" onclick="testBigQueryAirbyte()">🔍 Airbyte Test BigQuery</button>
           </div>
         </form>
       </div>
 
-      <!-- Table Selection & Migration Runner -->
-      <div class="card">
-        <div class="card-header">
-          <div class="card-title">📦 Tabel Database PostgreSQL</div>
-          <button class="btn btn-secondary" onclick="loadTables()">Muat Tabel</button>
-        </div>
-
-        <div id="tableContainer" class="table-list">
-          <div style="text-align: center; padding: 2rem; color: var(--text-muted);">
-            Klik "Muat Tabel" untuk melihat daftar tabel di PostgreSQL.
+      <!-- Airbyte Connection Test Diagnostics & Tables Panel -->
+      <div>
+        <!-- Airbyte Postgres Diagnostic Card -->
+        <div id="pgAirbyteCard" class="card" style="margin-bottom: 1.5rem; display: none;">
+          <div class="airbyte-header">
+            <span>🔍 PostgreSQL Diagnostic Checklist</span>
+            <span id="pgBadge" class="status-badge" style="padding: 0.2rem 0.6rem;">Testing...</span>
           </div>
+          <ul id="pgChecklist" class="airbyte-checklist"></ul>
         </div>
 
-        <div style="margin-top: 1.5rem; display: flex; gap: 1rem;">
-          <button class="btn btn-secondary" onclick="startMigration(true)">Dry Run (Uji Skema)</button>
-          <button class="btn btn-primary" style="flex: 1;" onclick="startMigration(false)">⚡ Jalankan Migrasi</button>
+        <!-- Airbyte BigQuery Diagnostic Card -->
+        <div id="bqAirbyteCard" class="card" style="margin-bottom: 1.5rem; display: none;">
+          <div class="airbyte-header">
+            <span>🔍 BigQuery Service Account Diagnostic Checklist</span>
+            <span id="bqBadge" class="status-badge" style="padding: 0.2rem 0.6rem;">Testing...</span>
+          </div>
+          <ul id="bqChecklist" class="airbyte-checklist"></ul>
+        </div>
+
+        <!-- Table Selector & Migration Action -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">📦 PostgreSQL Tables</div>
+            <button class="btn btn-secondary" onclick="loadTables()">Muat Tabel</button>
+          </div>
+
+          <div id="tableContainer" class="table-list">
+            <div style="text-align: center; padding: 2rem; color: var(--text-muted);">
+              Klik "Muat Tabel" untuk melihat tabel PostgreSQL.
+            </div>
+          </div>
+
+          <div style="margin-top: 1.5rem; display: flex; gap: 1rem;">
+            <button class="btn btn-secondary" onclick="startMigration(true)">Dry Run (Uji Skema)</button>
+            <button class="btn btn-primary" style="flex: 1;" onclick="startMigration(false)">⚡ Jalankan Migrasi</button>
+          </div>
         </div>
       </div>
     </div>
 
-    <!-- Live Migration Progress & Console Log -->
+    <!-- Terminal & Progress Logs -->
     <div class="card">
       <div class="card-header">
         <div class="card-title">📊 Live Migration Terminal & Progress</div>
-        <span id="progressText" style="font-size: 0.85rem; color: var(--text-muted);">Menunggu proses...</span>
+        <span id="progressText" style="font-size: 0.85rem; color: var(--text-muted);">Status: Ready</span>
       </div>
 
       <div class="progress-bar-container">
@@ -368,7 +478,7 @@
       </div>
 
       <div id="logTerminal" class="log-terminal">
-        <div class="log-entry info">[SYSTEM] Web Dashboard Siap. Hubungkan ke server...</div>
+        <div class="log-entry info">[SYSTEM] Airbyte-style Dashboard initialized. Input credentials and run connection test.</div>
       </div>
     </div>
   </div>
@@ -380,15 +490,8 @@
       const loc = window.location;
       const wsProtocol = loc.protocol === "https:" ? "wss:" : "ws:";
       ws = new WebSocket(`${wsProtocol}//${loc.host}/ws/logs`);
-
-      ws.onmessage = (event) => {
-        const msg = JSON.parse(event.data);
-        handleWSMessage(msg);
-      };
-
-      ws.onclose = () => {
-        setTimeout(initWS, 2000);
-      };
+      ws.onmessage = (e) => handleWSMessage(JSON.parse(e.data));
+      ws.onclose = () => setTimeout(initWS, 2000);
     }
 
     function appendLog(text, type = 'info') {
@@ -421,25 +524,135 @@
       }
     }
 
-    async function testConnections() {
-      appendLog('Memeriksa koneksi PostgreSQL & BigQuery...', 'info');
+    function handleFileUpload(event) {
+      const file = event.target.files[0];
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          document.getElementById('gcp_sa_key_json').value = e.target.result;
+          appendLog(`✓ Uploded JSON Key file: ${file.name}`, 'success');
+        };
+        reader.readAsText(file);
+      }
+    }
+
+    async function saveConfig() {
+      const payload = {
+        pg_host: document.getElementById('pg_host').value,
+        pg_port: parseInt(document.getElementById('pg_port').value),
+        pg_user: document.getElementById('pg_user').value,
+        pg_password: document.getElementById('pg_password').value,
+        pg_database: document.getElementById('pg_database').value,
+        pg_schema: document.getElementById('pg_schema').value,
+        gcp_project_id: document.getElementById('gcp_project_id').value,
+        bigquery_dataset_id: document.getElementById('bigquery_dataset_id').value,
+        gcp_sa_key_json: document.getElementById('gcp_sa_key_json').value
+      };
+
       try {
-        const res = await fetch('/api/test-connections');
+        const res = await fetch('/api/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        appendLog('✓ Konfigurasi & Service Account JSON Key tersimpan.', 'success');
+      } catch (err) {
+        appendLog(`Error save config: ${err}`, 'error');
+      }
+    }
+
+    async function testPostgresAirbyte() {
+      await saveConfig();
+      const card = document.getElementById('pgAirbyteCard');
+      const checklistEl = document.getElementById('pgChecklist');
+      const badge = document.getElementById('pgBadge');
+      card.style.display = 'block';
+      badge.innerText = 'Testing...';
+      badge.style.color = '#f59e0b';
+      badge.style.borderColor = 'rgba(245, 158, 11, 0.4)';
+
+      try {
+        const res = await fetch('/api/test-postgres', { method: 'POST' });
         const data = await res.json();
 
-        if (data.postgres.status === 'success') {
-          appendLog(`✓ PostgreSQL Terhubung! Versi: ${data.postgres.version}`, 'success');
-        } else {
-          appendLog(`✗ PostgreSQL Gagal: ${data.postgres.message}`, 'error');
+        checklistEl.innerHTML = '';
+        if (data.checklist) {
+          data.checklist.forEach(item => {
+            const icon = item.status === 'success' ? '✓' : (item.status === 'failed' ? '✗' : '⚠');
+            const iconClass = item.status;
+            checklistEl.innerHTML += `
+              <li class="airbyte-step">
+                <div class="step-icon ${iconClass}">${icon}</div>
+                <div>
+                  <div class="step-title">${item.name}</div>
+                  <div class="step-detail">${item.detail}</div>
+                </div>
+              </li>
+            `;
+          });
         }
 
-        if (data.bigquery.status === 'success') {
-          appendLog(`✓ BigQuery Terhubung! Project: ${data.bigquery.project_id}`, 'success');
+        if (data.status === 'success') {
+          badge.innerText = 'CONNECTED';
+          badge.style.color = '#10b981';
+          badge.style.borderColor = 'rgba(16, 185, 129, 0.4)';
+          appendLog(`✓ PostgreSQL Airbyte Connection Test PASSED (${data.table_count} tables found)`, 'success');
         } else {
-          appendLog(`✗ BigQuery Gagal: ${data.bigquery.message}`, 'error');
+          badge.innerText = 'FAILED';
+          badge.style.color = '#ef4444';
+          badge.style.borderColor = 'rgba(239, 68, 68, 0.4)';
+          appendLog(`✗ PostgreSQL Connection Test FAILED: ${data.message}`, 'error');
         }
       } catch (err) {
-        appendLog(`Error tes koneksi: ${err}`, 'error');
+        appendLog(`Error testing PostgreSQL: ${err}`, 'error');
+      }
+    }
+
+    async function testBigQueryAirbyte() {
+      await saveConfig();
+      const card = document.getElementById('bqAirbyteCard');
+      const checklistEl = document.getElementById('bqChecklist');
+      const badge = document.getElementById('bqBadge');
+      card.style.display = 'block';
+      badge.innerText = 'Testing...';
+      badge.style.color = '#f59e0b';
+      badge.style.borderColor = 'rgba(245, 158, 11, 0.4)';
+
+      try {
+        const res = await fetch('/api/test-bigquery', { method: 'POST' });
+        const data = await res.json();
+
+        checklistEl.innerHTML = '';
+        if (data.checklist) {
+          data.checklist.forEach(item => {
+            const icon = item.status === 'success' ? '✓' : (item.status === 'failed' ? '✗' : '⚠');
+            const iconClass = item.status;
+            checklistEl.innerHTML += `
+              <li class="airbyte-step">
+                <div class="step-icon ${iconClass}">${icon}</div>
+                <div>
+                  <div class="step-title">${item.name}</div>
+                  <div class="step-detail">${item.detail}</div>
+                </div>
+              </li>
+            `;
+          });
+        }
+
+        if (data.status === 'success') {
+          badge.innerText = 'AUTHENTICATED';
+          badge.style.color = '#10b981';
+          badge.style.borderColor = 'rgba(16, 185, 129, 0.4)';
+          appendLog(`✓ BigQuery Service Account PASSED (Project: ${data.project_id}, SA: ${data.service_account})`, 'success');
+        } else {
+          badge.innerText = 'FAILED';
+          badge.style.color = '#ef4444';
+          badge.style.borderColor = 'rgba(239, 68, 68, 0.4)';
+          appendLog(`✗ BigQuery Connection Test FAILED: ${data.message}`, 'error');
+        }
+      } catch (err) {
+        appendLog(`Error testing BigQuery: ${err}`, 'error');
       }
     }
 
@@ -472,32 +685,8 @@
       }
     }
 
-    async function saveConfig() {
-      const payload = {
-        pg_host: document.getElementById('pg_host').value,
-        pg_port: parseInt(document.getElementById('pg_port').value),
-        pg_user: document.getElementById('pg_user').value,
-        pg_password: document.getElementById('pg_password').value,
-        pg_database: document.getElementById('pg_database').value,
-        pg_schema: document.getElementById('pg_schema').value,
-        gcp_project_id: document.getElementById('gcp_project_id').value,
-        bigquery_dataset_id: document.getElementById('bigquery_dataset_id').value
-      };
-
-      try {
-        const res = await fetch('/api/config', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-        const data = await res.json();
-        appendLog('✓ Konfigurasi tersimpan.', 'success');
-      } catch (err) {
-        appendLog(`Error simpan konfigurasi: ${err}`, 'error');
-      }
-    }
-
     async function startMigration(dryRun = false) {
+      await saveConfig();
       appendLog(`Memulai proses migrasi (Dry Run: ${dryRun})...`, 'info');
       try {
         const res = await fetch('/api/migrate', {
