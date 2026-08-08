@@ -30,18 +30,19 @@ active_websockets: List[WebSocket] = []
 
 
 class ConfigUpdateModel(BaseModel):
-    pg_host: str
-    pg_port: int
-    pg_user: str
-    pg_password: str
-    pg_database: str
+    pg_host: str = "localhost"
+    pg_port: int = 5432
+    pg_user: str = "postgres"
+    pg_password: str = ""
+    pg_database: str = "postgres"
     pg_schema: str = "public"
     pg_sslmode: str = "prefer"
-    gcp_project_id: str
-    bigquery_dataset_id: str
+    gcp_project_id: Optional[str] = ""
+    bigquery_dataset_id: Optional[str] = ""
     gcp_sa_key_json: Optional[str] = None
     batch_size: int = 50000
     write_disposition: str = "WRITE_TRUNCATE"
+
 
 
 class MigrationRequestModel(BaseModel):

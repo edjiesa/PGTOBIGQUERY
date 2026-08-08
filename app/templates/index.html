@@ -562,6 +562,22 @@
       }
     }
 
+    async function safeFetchJson(url, options) {
+      try {
+        const res = await fetch(url, options);
+        const text = await res.text();
+        let data;
+        try {
+          data = JSON.parse(text);
+        } catch (e) {
+          data = { message: text.substring(0, 300) || `HTTP Error ${res.status}` };
+        }
+        return { ok: res.ok, status: res.status, data: data };
+      } catch (err) {
+        return { ok: false, status: 0, data: { message: str(err) } };
+      }
+    }
+
     // Remote Profiles Management via LocalStorage
     function getProfiles() {
       return JSON.parse(localStorage.getItem('pg_remote_profiles') || '{}');
@@ -582,19 +598,20 @@
     function saveCurrentProfile() {
       const name = document.getElementById('profile_name').value.trim() || `Profile-${Date.now()}`;
       const profiles = getProfiles();
+      const portVal = parseInt(document.getElementById('pg_port').value);
 
       profiles[name] = {
         name: name,
-        pg_host: document.getElementById('pg_host').value,
-        pg_port: parseInt(document.getElementById('pg_port').value),
-        pg_user: document.getElementById('pg_user').value,
-        pg_password: document.getElementById('pg_password').value,
-        pg_database: document.getElementById('pg_database').value,
-        pg_schema: document.getElementById('pg_schema').value,
-        pg_sslmode: document.getElementById('pg_sslmode').value,
-        gcp_project_id: document.getElementById('gcp_project_id').value,
-        bigquery_dataset_id: document.getElementById('bigquery_dataset_id').value,
-        gcp_sa_key_json: document.getElementById('gcp_sa_key_json').value
+        pg_host: document.getElementById('pg_host').value || 'localhost',
+        pg_port: isNaN(portVal) ? 5432 : portVal,
+        pg_user: document.getElementById('pg_user').value || 'postgres',
+        pg_password: document.getElementById('pg_password').value || '',
+        pg_database: document.getElementById('pg_database').value || 'postgres',
+        pg_schema: document.getElementById('pg_schema').value || 'public',
+        pg_sslmode: document.getElementById('pg_sslmode').value || 'prefer',
+        gcp_project_id: document.getElementById('gcp_project_id').value || '',
+        bigquery_dataset_id: document.getElementById('bigquery_dataset_id').value || '',
+        gcp_sa_key_json: document.getElementById('gcp_sa_key_json').value || ''
       };
 
       localStorage.setItem('pg_remote_profiles', JSON.stringify(profiles));
@@ -635,29 +652,30 @@
     }
 
     async function saveConfig() {
+      const portVal = parseInt(document.getElementById('pg_port').value);
       const payload = {
-        pg_host: document.getElementById('pg_host').value,
-        pg_port: parseInt(document.getElementById('pg_port').value),
-        pg_user: document.getElementById('pg_user').value,
-        pg_password: document.getElementById('pg_password').value,
-        pg_database: document.getElementById('pg_database').value,
-        pg_schema: document.getElementById('pg_schema').value,
-        pg_sslmode: document.getElementById('pg_sslmode').value,
-        gcp_project_id: document.getElementById('gcp_project_id').value,
-        bigquery_dataset_id: document.getElementById('bigquery_dataset_id').value,
-        gcp_sa_key_json: document.getElementById('gcp_sa_key_json').value
+        pg_host: document.getElementById('pg_host').value || 'localhost',
+        pg_port: isNaN(portVal) ? 5432 : portVal,
+        pg_user: document.getElementById('pg_user').value || 'postgres',
+        pg_password: document.getElementById('pg_password').value || '',
+        pg_database: document.getElementById('pg_database').value || 'postgres',
+        pg_schema: document.getElementById('pg_schema').value || 'public',
+        pg_sslmode: document.getElementById('pg_sslmode').value || 'prefer',
+        gcp_project_id: document.getElementById('gcp_project_id').value || '',
+        bigquery_dataset_id: document.getElementById('bigquery_dataset_id').value || '',
+        gcp_sa_key_json: document.getElementById('gcp_sa_key_json').value || ''
       };
 
-      try {
-        const res = await fetch('/api/config', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-        const data = await res.json();
+      const res = await safeFetchJson('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (res.ok) {
         appendLog('✓ Konfigurasi & Remote Connection tersimpan ke server.', 'success');
-      } catch (err) {
-        appendLog(`Error save config: ${err}`, 'error');
+      } else {
+        appendLog(`✗ Error save config: ${res.data.message || 'Validation Error'}`, 'error');
       }
     }
 
@@ -671,40 +689,36 @@
       badge.style.color = '#f59e0b';
       badge.style.borderColor = 'rgba(245, 158, 11, 0.4)';
 
-      try {
-        const res = await fetch('/api/test-postgres', { method: 'POST' });
-        const data = await res.json();
+      const res = await safeFetchJson('/api/test-postgres', { method: 'POST' });
+      const data = res.data;
 
-        checklistEl.innerHTML = '';
-        if (data.checklist) {
-          data.checklist.forEach(item => {
-            const icon = item.status === 'success' ? '✓' : (item.status === 'failed' ? '✗' : '⚠');
-            const iconClass = item.status;
-            checklistEl.innerHTML += `
-              <li class="airbyte-step">
-                <div class="step-icon ${iconClass}">${icon}</div>
-                <div>
-                  <div class="step-title">${item.name}</div>
-                  <div class="step-detail">${item.detail}</div>
-                </div>
-              </li>
-            `;
-          });
-        }
+      checklistEl.innerHTML = '';
+      if (data.checklist) {
+        data.checklist.forEach(item => {
+          const icon = item.status === 'success' ? '✓' : (item.status === 'failed' ? '✗' : '⚠');
+          const iconClass = item.status;
+          checklistEl.innerHTML += `
+            <li class="airbyte-step">
+              <div class="step-icon ${iconClass}">${icon}</div>
+              <div>
+                <div class="step-title">${item.name}</div>
+                <div class="step-detail">${item.detail}</div>
+              </div>
+            </li>
+          `;
+        });
+      }
 
-        if (data.status === 'success') {
-          badge.innerText = 'CONNECTED';
-          badge.style.color = '#10b981';
-          badge.style.borderColor = 'rgba(16, 185, 129, 0.4)';
-          appendLog(`✓ Remote PostgreSQL Airbyte Test PASSED (${data.table_count} tables found)`, 'success');
-        } else {
-          badge.innerText = 'FAILED';
-          badge.style.color = '#ef4444';
-          badge.style.borderColor = 'rgba(239, 68, 68, 0.4)';
-          appendLog(`✗ Remote PostgreSQL Test FAILED: ${data.message}`, 'error');
-        }
-      } catch (err) {
-        appendLog(`Error testing PostgreSQL: ${err}`, 'error');
+      if (res.ok && data.status === 'success') {
+        badge.innerText = 'CONNECTED';
+        badge.style.color = '#10b981';
+        badge.style.borderColor = 'rgba(16, 185, 129, 0.4)';
+        appendLog(`✓ Remote PostgreSQL Airbyte Test PASSED (${data.table_count} tables found)`, 'success');
+      } else {
+        badge.innerText = 'FAILED';
+        badge.style.color = '#ef4444';
+        badge.style.borderColor = 'rgba(239, 68, 68, 0.4)';
+        appendLog(`✗ Remote PostgreSQL Test FAILED: ${data.message || 'Connection Error'}`, 'error');
       }
     }
 
@@ -718,86 +732,78 @@
       badge.style.color = '#f59e0b';
       badge.style.borderColor = 'rgba(245, 158, 11, 0.4)';
 
-      try {
-        const res = await fetch('/api/test-bigquery', { method: 'POST' });
-        const data = await res.json();
+      const res = await safeFetchJson('/api/test-bigquery', { method: 'POST' });
+      const data = res.data;
 
-        checklistEl.innerHTML = '';
-        if (data.checklist) {
-          data.checklist.forEach(item => {
-            const icon = item.status === 'success' ? '✓' : (item.status === 'failed' ? '✗' : '⚠');
-            const iconClass = item.status;
-            checklistEl.innerHTML += `
-              <li class="airbyte-step">
-                <div class="step-icon ${iconClass}">${icon}</div>
-                <div>
-                  <div class="step-title">${item.name}</div>
-                  <div class="step-detail">${item.detail}</div>
-                </div>
-              </li>
-            `;
-          });
-        }
+      checklistEl.innerHTML = '';
+      if (data.checklist) {
+        data.checklist.forEach(item => {
+          const icon = item.status === 'success' ? '✓' : (item.status === 'failed' ? '✗' : '⚠');
+          const iconClass = item.status;
+          checklistEl.innerHTML += `
+            <li class="airbyte-step">
+              <div class="step-icon ${iconClass}">${icon}</div>
+              <div>
+                <div class="step-title">${item.name}</div>
+                <div class="step-detail">${item.detail}</div>
+              </div>
+            </li>
+          `;
+        });
+      }
 
-        if (data.status === 'success') {
-          badge.innerText = 'AUTHENTICATED';
-          badge.style.color = '#10b981';
-          badge.style.borderColor = 'rgba(16, 185, 129, 0.4)';
-          appendLog(`✓ BigQuery Service Account PASSED (Project: ${data.project_id}, SA: ${data.service_account})`, 'success');
-        } else {
-          badge.innerText = 'FAILED';
-          badge.style.color = '#ef4444';
-          badge.style.borderColor = 'rgba(239, 68, 68, 0.4)';
-          appendLog(`✗ BigQuery Connection Test FAILED: ${data.message}`, 'error');
-        }
-      } catch (err) {
-        appendLog(`Error testing BigQuery: ${err}`, 'error');
+      if (res.ok && data.status === 'success') {
+        badge.innerText = 'AUTHENTICATED';
+        badge.style.color = '#10b981';
+        badge.style.borderColor = 'rgba(16, 185, 129, 0.4)';
+        appendLog(`✓ BigQuery Service Account PASSED (Project: ${data.project_id}, SA: ${data.service_account})`, 'success');
+      } else {
+        badge.innerText = 'FAILED';
+        badge.style.color = '#ef4444';
+        badge.style.borderColor = 'rgba(239, 68, 68, 0.4)';
+        appendLog(`✗ BigQuery Connection Test FAILED: ${data.message || 'Authentication Error'}`, 'error');
       }
     }
 
     async function loadTables() {
       await saveConfig();
       appendLog('Mengambil daftar tabel dari Remote PostgreSQL...', 'info');
-      try {
-        const res = await fetch('/api/tables');
-        const data = await res.json();
+      const res = await safeFetchJson('/api/tables');
+      const data = res.data;
 
-        if (data.status === 'success') {
-          const container = document.getElementById('tableContainer');
-          container.innerHTML = '';
-          data.tables.forEach(t => {
-            container.innerHTML += `
-              <div class="table-item">
-                <div>
-                  <div class="table-name">${t.table_name}</div>
-                  <div class="table-meta">${t.column_count} kolom</div>
-                </div>
-                <div class="table-meta" style="font-weight: 600; color: var(--text-main);">${t.row_count.toLocaleString()} baris</div>
+      if (res.ok && data.status === 'success') {
+        const container = document.getElementById('tableContainer');
+        container.innerHTML = '';
+        data.tables.forEach(t => {
+          container.innerHTML += `
+            <div class="table-item">
+              <div>
+                <div class="table-name">${t.table_name}</div>
+                <div class="table-meta">${t.column_count} kolom</div>
               </div>
-            `;
-          });
-          appendLog(`Berhasil memuat ${data.tables.length} tabel dari remote database.`, 'success');
-        } else {
-          appendLog(`Gagal memuat tabel: ${data.message}`, 'error');
-        }
-      } catch (err) {
-        appendLog(`Error load tables: ${err}`, 'error');
+              <div class="table-meta" style="font-weight: 600; color: var(--text-main);">${t.row_count.toLocaleString()} baris</div>
+            </div>
+          `;
+        });
+        appendLog(`Berhasil memuat ${data.tables.length} tabel dari remote database.`, 'success');
+      } else {
+        appendLog(`Gagal memuat tabel: ${data.message || 'Connection Error'}`, 'error');
       }
     }
 
     async function startMigration(dryRun = false) {
       await saveConfig();
       appendLog(`Memulai proses migrasi remote (Dry Run: ${dryRun})...`, 'info');
-      try {
-        const res = await fetch('/api/migrate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ dry_run: dryRun })
-        });
-        const data = await res.json();
+      const res = await safeFetchJson('/api/migrate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dry_run: dryRun })
+      });
+      const data = res.data;
+      if (res.ok) {
         appendLog(`Server response: ${data.message}`, 'info');
-      } catch (err) {
-        appendLog(`Error trigger migration: ${err}`, 'error');
+      } else {
+        appendLog(`Error trigger migration: ${data.message || 'Server Error'}`, 'error');
       }
     }
 
@@ -808,3 +814,4 @@
   </script>
 </body>
 </html>
+
