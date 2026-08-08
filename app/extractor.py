@@ -23,7 +23,8 @@ class PostgresExtractor:
                 password=self.config.pg_password,
                 dbname=self.config.pg_database,
                 sslmode=self.config.pg_sslmode,
-                connect_timeout=3
+                connect_timeout=3,
+                options="-c statement_timeout=3000"
             )
             logger.info(f"Connected to PostgreSQL at {self.config.pg_host}:{self.config.pg_port}/{self.config.pg_database} (sslmode={self.config.pg_sslmode})")
 
@@ -60,7 +61,7 @@ class PostgresExtractor:
                 "checklist": checklist
             }
 
-        # Step 2 & 3: Authentication & Version Check
+        # Step 2, 3 & 4: Authentication, Version, and Catalog Inspection (3s max)
         try:
             self.connect()
             checklist[1]["status"] = "success"
@@ -72,16 +73,21 @@ class PostgresExtractor:
                 checklist[2]["status"] = "success"
                 checklist[2]["detail"] = f"{version.split(',')[0]}"
 
-                tables = self.get_tables()
+                cur.execute("""
+                    SELECT COUNT(*)
+                    FROM information_schema.tables
+                    WHERE table_schema = %s AND table_type = 'BASE TABLE';
+                """, (self.config.pg_schema,))
+                cnt = cur.fetchone()[0]
                 checklist[3]["status"] = "success"
-                checklist[3]["detail"] = f"Schema '{self.config.pg_schema}' contains {len(tables)} base table(s)."
+                checklist[3]["detail"] = f"Schema '{self.config.pg_schema}' contains {cnt} base table(s)."
 
             return {
                 "status": "success",
                 "message": "PostgreSQL connection test succeeded!",
                 "database": self.config.pg_database,
                 "schema": self.config.pg_schema,
-                "table_count": len(tables),
+                "table_count": cnt,
                 "checklist": checklist
             }
         except Exception as e:
@@ -92,6 +98,7 @@ class PostgresExtractor:
                 "message": f"PostgreSQL connection failed: {str(e)}",
                 "checklist": checklist
             }
+
 
 
 
