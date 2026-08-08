@@ -290,12 +290,10 @@ class PostgresExtractor:
                             try:
                                 self.conn.rollback()
                                 with self.conn.cursor() as oid_cur:
-                                    oid_cur.execute(
-                                        "SELECT oid, pg_catalog.format_type(oid, -1) FROM pg_type WHERE oid = ANY(%s);",
-                                        (oids,)
-                                    )
+                                    oid_cur.execute("SELECT oid, typname FROM pg_type;")
                                     for r in oid_cur.fetchall():
                                         oid_type_map[r[0]] = r[1]
+
                             except Exception as oid_err:
                                 logger.warning(f"Could not map type OIDs for table '{table_name}': {oid_err}")
                                 try:
