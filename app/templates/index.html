@@ -1237,22 +1237,45 @@
 
     async function syncSingleTable(tableName) {
       await saveConfig();
-      appendLog(`🚀 Memulai migrasi 1 tabel spesifik: ${tableName}...`, 'info');
+      appendLog(`🚀 Memulai migrasi 1 tabel spesifik: '${tableName}'...`, 'info');
+      updateSingleTableRowStatus(tableName, 'RUNNING', '⏳ Proses migrasi ke BigQuery...');
+
       try {
         const res = await safeFetchJson('/api/migrate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ tables: [tableName], dry_run: false })
         });
-        if (res.ok) {
-          appendLog(`✓ Tabel '${tableName}' berhasil diproses di background server.`, 'success');
-        } else {
+
+        if (!res.ok) {
           appendLog(`✗ Error sync tabel '${tableName}': ${res.data.message}`, 'error');
+          updateSingleTableRowStatus(tableName, 'FAILED', `✗ Gagal: ${res.data.message}`);
+          return;
+        }
+
+        // Poll progress until this table is verified completed
+        let attempts = 0;
+        while (attempts < 60) {
+          await new Promise(r => setTimeout(r, 1000));
+          attempts++;
+          const progRes = await safeFetchJson('/api/migration-progress');
+          if (progRes.ok && progRes.data && progRes.data.progress) {
+            const p = progRes.data.progress;
+            if (p.last_completed_table === tableName || (!p.is_running && p.tables_processed > 0)) {
+              const rows = p.last_completed_rows || 0;
+              appendLog(`🎉 [SELESAI DIBENTUK & TERISI] Tabel BigQuery '${tableName}' -> ${rows.toLocaleString()} baris data SUKSES TERVERIFIKASI TERMUAT!`, 'success');
+              updateSingleTableRowStatus(tableName, 'SUCCESS', `✓ ${rows.toLocaleString()} baris in BigQuery`);
+              savePersistentState();
+              return;
+            }
+          }
         }
       } catch (err) {
         appendLog(`✗ Failed sync tabel '${tableName}': ${err}`, 'error');
+        updateSingleTableRowStatus(tableName, 'FAILED', `✗ Gagal: ${err}`);
       }
     }
+
 
 
 
@@ -1367,12 +1390,20 @@
       }
     }
 
+    let lastLoggedCompletedTable = null;
+
     async function pollMigrationProgress() {
       try {
         const res = await safeFetchJson('/api/migration-progress');
         if (res.ok && res.data && res.data.progress) {
           const prog = res.data.progress;
           const statusText = document.getElementById('progressText');
+
+          if (prog.last_completed_table && prog.last_completed_table !== lastLoggedCompletedTable) {
+            lastLoggedCompletedTable = prog.last_completed_table;
+            appendLog(`🎉 [SELESAI DIBENTUK & TERISI] Tabel BigQuery '${prog.last_completed_table}' -> ${(prog.last_completed_rows || 0).toLocaleString()} baris data SUKSES TERVERIFIKASI TERMUAT!`, 'success');
+            updateSingleTableRowStatus(prog.last_completed_table, 'SUCCESS', `✓ ${(prog.last_completed_rows || 0).toLocaleString()} baris in BigQuery`);
+          }
 
           if (prog.is_running) {
             const currentTName = prog.current_table_name || '-';
@@ -1395,6 +1426,7 @@
         console.warn('Polling migration progress error:', err);
       }
     }
+
 
     window.onload = async () => {
       initWS();
