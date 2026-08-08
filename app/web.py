@@ -119,8 +119,8 @@ async def update_config(data: ConfigUpdateModel):
 
 
 @web_app.post("/api/test-postgres")
-async def test_postgres():
-    """Airbyte-style diagnostic connection test for PostgreSQL."""
+def test_postgres():
+    """Airbyte-style diagnostic connection test for PostgreSQL (Runs off-thread)."""
     extractor = PostgresExtractor(config)
     res = extractor.test_connection()
     extractor.close()
@@ -128,16 +128,16 @@ async def test_postgres():
 
 
 @web_app.post("/api/test-bigquery")
-async def test_bigquery():
-    """Airbyte-style diagnostic connection test for Google BigQuery."""
+def test_bigquery():
+    """Airbyte-style diagnostic connection test for Google BigQuery (Runs off-thread)."""
     loader = BigQueryLoader(config)
     res = loader.test_connection()
     return res
 
 
 @web_app.get("/api/test-connections")
-async def test_connections():
-    """Tests connections to PostgreSQL and BigQuery concurrently."""
+def test_connections():
+    """Tests connections to PostgreSQL and BigQuery concurrently (Runs off-thread)."""
     extractor = PostgresExtractor(config)
     pg_res = extractor.test_connection()
     extractor.close()
@@ -151,10 +151,9 @@ async def test_connections():
     }
 
 
-
 @web_app.get("/api/tables")
-async def list_tables():
-    """Fetches PostgreSQL tables and metadata."""
+def list_tables():
+    """Fetches PostgreSQL tables and metadata (Runs off-thread)."""
     try:
         extractor = PostgresExtractor(config)
         tables = extractor.get_tables()
@@ -173,6 +172,7 @@ async def list_tables():
         return {"status": "success", "tables": result}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
 
 
 @web_app.post("/api/migrate")
