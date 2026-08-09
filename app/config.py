@@ -47,10 +47,18 @@ class MigrationConfig(BaseSettings):
         env_lines = []
         env_path = ".env"
         
-        # Read existing .env if it exists
+        # Read existing .env if it exists and is a file
         if os.path.exists(env_path):
-            with open(env_path, "r", encoding="utf-8") as f:
-                env_lines = f.readlines()
+            if os.path.isdir(env_path):
+                import logging
+                logging.getLogger(__name__).warning(f"'{env_path}' is a directory, not a file. Docker likely created it automatically. Cannot persist config.")
+            else:
+                try:
+                    with open(env_path, "r", encoding="utf-8") as f:
+                        env_lines = f.readlines()
+                except Exception as e:
+                    import logging
+                    logging.getLogger(__name__).warning(f"Failed to read '{env_path}': {e}")
                 
         env_dict = {}
         for line in env_lines:
@@ -77,10 +85,15 @@ class MigrationConfig(BaseSettings):
                 
                 env_dict[env_key] = str(value)
 
-        # Write back to .env
-        with open(env_path, "w", encoding="utf-8") as f:
-            for k, v in env_dict.items():
-                f.write(f"{k}={v}\n")
+        # Write back to .env if it's not a directory
+        if not os.path.isdir(env_path):
+            try:
+                with open(env_path, "w", encoding="utf-8") as f:
+                    for k, v in env_dict.items():
+                        f.write(f"{k}={v}\n")
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"Failed to write to '{env_path}': {e}")
 
 
 
