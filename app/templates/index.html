@@ -562,14 +562,103 @@
   <script>
     let ws;
     let bgPollInterval = null;
+    let wsFailedFallbackActive = false;
+    let wsFallbackInterval = null;
 
     function initWS() {
       const loc = window.location;
       const wsProtocol = loc.protocol === "https:" ? "wss:" : "ws:";
-      ws = new WebSocket(`${wsProtocol}//${loc.host}/ws/logs`);
-      ws.onmessage = (e) => handleWSMessage(JSON.parse(e.data));
-      ws.onclose = () => setTimeout(initWS, 3000);
+      const wsUrl = `${wsProtocol}//${loc.host}/ws/logs`;
+
+      try {
+        ws = new WebSocket(wsUrl);
+      } catch (e) {
+        console.warn("WebSocket tidak tersedia, beralih ke HTTP polling fallback.");
+        activateWsFallbackPolling();
+        return;
+      }
+
+      let wsConnected = false;
+
+      ws.onopen = () => {
+        wsConnected = true;
+        wsFailedFallbackActive = false;
+        if (wsFallbackInterval) { clearInterval(wsFallbackInterval); wsFallbackInterval = null; }
+        // Remove WS error banner if present
+        const b = document.getElementById('wsErrorBanner');
+        if (b) b.remove();
+      };
+
+      ws.onmessage = (e) => {
+        try { handleWSMessage(JSON.parse(e.data)); } catch(err) {}
+      };
+
+      ws.onerror = () => {
+        if (!wsConnected) {
+          // WS failed before ever connecting — show notice and use HTTP polling
+          showWsErrorBanner();
+          activateWsFallbackPolling();
+        }
+      };
+
+      ws.onclose = () => {
+        if (!wsConnected) {
+          showWsErrorBanner();
+          activateWsFallbackPolling();
+        } else {
+          // Normal reconnect
+          setTimeout(initWS, 3000);
+        }
+      };
     }
+
+    function showWsErrorBanner() {
+      if (wsFailedFallbackActive) return;
+      wsFailedFallbackActive = true;
+      if (document.getElementById('wsErrorBanner')) return;
+      const banner = document.createElement('div');
+      banner.id = 'wsErrorBanner';
+      banner.style.cssText = `
+        position: fixed; bottom: 0; left: 0; right: 0; z-index: 8888;
+        background: rgba(30,30,40,0.97); border-top: 2px solid #f59e0b;
+        color: #fbbf24; padding: 8px 18px; font-size: 0.8rem;
+        display: flex; align-items: center; justify-content: space-between;
+      `;
+      banner.innerHTML = `
+        <span>⚠ WebSocket tidak tersambung — menggunakan HTTP polling sebagai fallback. 
+        Pastikan Nginx dikonfigurasi dengan header <code>Upgrade: websocket</code>.</span>
+        <button onclick="this.parentElement.remove()" style="background:transparent;border:none;color:#fbbf24;cursor:pointer;font-size:1rem;">✕</button>
+      `;
+      document.body.appendChild(banner);
+    }
+
+    function activateWsFallbackPolling() {
+      if (wsFallbackInterval) return;
+      // Poll /api/migration-running every 3s as substitute for WS events
+      wsFallbackInterval = setInterval(async () => {
+        try {
+          const res = await fetch('/api/migration-running');
+          const data = await res.json();
+          if (data.is_running && data.progress) {
+            const p = data.progress;
+            showBgMigrationBanner(p);
+            const processed = p.tables_processed || 0;
+            const total = p.total_tables || 0;
+            const pct = total > 0 ? Math.round((processed / total) * 100) : 0;
+            document.getElementById('statTablesProcessed').innerText = `${processed} / ${total}`;
+            document.getElementById('statCurrentTable').innerText = p.current_table_name || '-';
+            document.getElementById('progressBar').style.width = `${pct}%`;
+            document.getElementById('progressText').innerText = `[${processed}/${total}] Migrasi berjalan...`;
+            if (p.last_completed_table) {
+              appendLog(`✓ [POLL] Tabel selesai: '${p.last_completed_table}' — ${p.last_completed_rows || 0} baris`, 'success');
+            }
+          } else if (!data.is_running) {
+            hideBgMigrationBanner();
+          }
+        } catch(e) {}
+      }, 3000);
+    }
+
 
     // On page load: check if migration is already running on server (from any browser)
     async function checkServerMigrationStatus() {
