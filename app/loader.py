@@ -44,7 +44,7 @@ class BigQueryLoader:
             return bigquery.Client(project=project_id or creds.project_id, credentials=creds)
 
         # 2. From Credentials JSON file
-        if self.config.gcp_credentials_file and os.path.exists(self.config.gcp_credentials_file):
+        if self.config.gcp_credentials_file and os.path.isfile(self.config.gcp_credentials_file):
             creds = service_account.Credentials.from_service_account_file(self.config.gcp_credentials_file)
             return bigquery.Client(project=project_id or creds.project_id, credentials=creds)
 
@@ -78,9 +78,10 @@ class BigQueryLoader:
                 project_id = project_id or sa_info.get("project_id")
                 checklist[0]["status"] = "success"
                 checklist[0]["detail"] = f"Valid Service Account Key for '{auth_email}'"
-            elif self.config.gcp_credentials_file and os.path.exists(self.config.gcp_credentials_file):
+            elif self.config.gcp_credentials_file and os.path.isfile(self.config.gcp_credentials_file):
                 with open(self.config.gcp_credentials_file, "r") as f:
                     sa_info = json.load(f)
+
                     auth_email = sa_info.get("client_email", "File Credentials")
                     project_id = project_id or sa_info.get("project_id")
                 checklist[0]["status"] = "success"
