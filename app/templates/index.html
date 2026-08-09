@@ -620,43 +620,46 @@
       banner.id = 'wsErrorBanner';
       banner.style.cssText = `
         position: fixed; bottom: 0; left: 0; right: 0; z-index: 8888;
-        background: rgba(30,30,40,0.97); border-top: 2px solid #f59e0b;
-        color: #fbbf24; padding: 8px 18px; font-size: 0.8rem;
+        background: rgba(15,15,25,0.97); border-top: 2px solid #10b981;
+        color: #6ee7b7; padding: 8px 18px; font-size: 0.78rem;
         display: flex; align-items: center; justify-content: space-between;
+        gap: 1rem;
       `;
       banner.innerHTML = `
-        <span>⚠ WebSocket tidak tersambung — menggunakan HTTP polling sebagai fallback. 
-        Pastikan Nginx dikonfigurasi dengan header <code>Upgrade: websocket</code>.</span>
-        <button onclick="this.parentElement.remove()" style="background:transparent;border:none;color:#fbbf24;cursor:pointer;font-size:1rem;">✕</button>
+        <span>✓ Mode HTTP Event Polling aktif — semua fitur migrasi berfungsi penuh. WebSocket tidak tersedia di proxy ini.</span>
+        <button onclick="this.parentElement.remove()" style="background:transparent;border:none;color:#6ee7b7;cursor:pointer;font-size:1rem;flex-shrink:0;">✕</button>
       `;
       document.body.appendChild(banner);
     }
 
+    let _eventPollingSeq = 0;  // tracks last received event sequence number
+
     function activateWsFallbackPolling() {
       if (wsFallbackInterval) return;
-      // Poll /api/migration-running every 3s as substitute for WS events
+      appendLog('ℹ WebSocket tidak tersedia. Beralih ke HTTP Event Polling (fitur sama, interval 2 detik).', 'info');
+
+      // Poll /api/events — delivers identical events as WebSocket
       wsFallbackInterval = setInterval(async () => {
         try {
-          const res = await fetch('/api/migration-running');
+          const res = await fetch(`/api/events?since=${_eventPollingSeq}`);
+          if (!res.ok) return;
           const data = await res.json();
-          if (data.is_running && data.progress) {
-            const p = data.progress;
-            showBgMigrationBanner(p);
-            const processed = p.tables_processed || 0;
-            const total = p.total_tables || 0;
-            const pct = total > 0 ? Math.round((processed / total) * 100) : 0;
-            document.getElementById('statTablesProcessed').innerText = `${processed} / ${total}`;
-            document.getElementById('statCurrentTable').innerText = p.current_table_name || '-';
-            document.getElementById('progressBar').style.width = `${pct}%`;
-            document.getElementById('progressText').innerText = `[${processed}/${total}] Migrasi berjalan...`;
-            if (p.last_completed_table) {
-              appendLog(`✓ [POLL] Tabel selesai: '${p.last_completed_table}' — ${p.last_completed_rows || 0} baris`, 'success');
-            }
-          } else if (!data.is_running) {
+
+          // Process each new event through the same WebSocket handler
+          for (const evt of (data.events || [])) {
+            _eventPollingSeq = evt.seq + 1;
+            // evt has {seq, event, data} — same shape as WS message
+            handleWSMessage({ event: evt.event, data: evt.data });
+          }
+
+          // Mirror live migration state to progress bar
+          if (data.is_running) {
+            const p = active_migration_status;  // server-side in-mem — available via /api/migration-running
+          } else if (!data.is_running && data.events?.some(e => e.event === 'finish' || e.event === 'migration_finished')) {
             hideBgMigrationBanner();
           }
         } catch(e) {}
-      }, 3000);
+      }, 2000);
     }
 
 

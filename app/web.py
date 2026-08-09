@@ -28,6 +28,23 @@ main_event_loop: Optional[asyncio.AbstractEventLoop] = None
 _bg_migration_thread: Optional[threading.Thread] = None
 _bg_migration_lock = threading.Lock()
 
+# Event buffer for HTTP polling fallback (works without WebSocket / Nginx Upgrade headers)
+_event_buffer: List[Dict[str, Any]] = []
+_event_buffer_lock = threading.Lock()
+_event_counter = 0
+EVENT_BUFFER_MAX = 500
+
+
+def buffer_ws_event(event: Dict[str, Any]):
+    """Stores a migration event in the in-memory buffer so HTTP clients can poll it."""
+    global _event_counter
+    with _event_buffer_lock:
+        _event_buffer.append({"seq": _event_counter, **event})
+        _event_counter += 1
+        # Keep buffer size bounded
+        while len(_event_buffer) > EVENT_BUFFER_MAX:
+            _event_buffer.pop(0)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -171,7 +188,10 @@ async def update_config(data: ConfigUpdateModel):
 
 
 def safe_ws_broadcast(message: Dict[str, Any]):
-    """Thread-safe WebSocket broadcaster for background worker threads."""
+    """Thread-safe WebSocket broadcaster AND event buffer writer for background worker threads."""
+    # Always buffer for HTTP polling fallback clients
+    buffer_ws_event(message)
+    # Also broadcast to live WebSocket clients if any are connected
     try:
         loop = main_event_loop or asyncio.get_event_loop()
         if loop and loop.is_running():
@@ -433,6 +453,23 @@ def stop_migration():
     """Signals the background migration to stop after the current table finishes."""
     active_migration_status["stop_requested"] = True
     return {"status": "stop_requested", "message": "Stop signal sent. Migration will finish the current table then stop."}
+
+
+@web_app.get("/api/events")
+def get_events(since: int = 0):
+    """HTTP polling fallback for WebSocket events. Returns all buffered events since 'since' sequence number.
+    Works through any HTTP proxy without WebSocket Upgrade headers.
+    Frontend polls this every 2 seconds when WebSocket is unavailable."""
+    global _event_counter
+    with _event_buffer_lock:
+        new_events = [e for e in _event_buffer if e["seq"] >= since]
+        latest_seq = _event_counter
+    return {
+        "events": new_events,
+        "latest_seq": latest_seq,
+        "is_running": _bg_migration_thread is not None and _bg_migration_thread.is_alive()
+    }
+
 
 @web_app.get("/api/diagnose-table/{table_name}")
 def diagnose_table(table_name: str):
