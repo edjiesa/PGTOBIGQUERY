@@ -42,7 +42,7 @@ services:
       WEB_HOST: "0.0.0.0"
       WEB_PORT: 8000
     volumes:
-      - ./.env:/app/.env:ro
+      - ./.env:/app/.env
       - ./gcp-service-account.json:/app/gcp-credentials.json:ro
       - pg_data_store:/app/data
 
