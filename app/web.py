@@ -74,6 +74,17 @@ class MigrationRequestModel(BaseModel):
     dry_run: bool = False
 
 
+class SyncRecordModel(BaseModel):
+    batch_key: str
+    timestamp: str
+    status: str   # "success" | "partial" | "failed"
+    tables_processed: int = 0
+    tables_total: int = 0
+    errors: List[str] = []
+    duration_seconds: float = 0.0
+
+
+
 async def broadcast_ws_message(message: Dict[str, Any]):
     """Broadcasts migration status updates to all connected web clients."""
     for ws in list(active_websockets):
@@ -450,8 +461,30 @@ def migrate_single_table(req: MigrationRequestModel):
 
 
 
+@web_app.post("/api/sync-record")
+def save_sync_record_endpoint(data: SyncRecordModel):
+    """Saves a batch sync record (success/partial/failed + errors) to persistent disk history."""
+    record = {
+        "timestamp": data.timestamp,
+        "status": data.status,
+        "tables_processed": data.tables_processed,
+        "tables_total": data.tables_total,
+        "errors": data.errors,
+        "duration_seconds": data.duration_seconds
+    }
+    state_manager.save_sync_record(data.batch_key, record)
+    return {"status": "saved"}
+
+
+@web_app.get("/api/sync-history")
+def get_sync_history_endpoint():
+    """Returns full sync history for all batches from persistent disk storage."""
+    return state_manager.load_sync_history()
+
+
 @web_app.get("/api/migration-progress")
 def get_migration_progress():
+
     """Returns real-time migration progress. Merges live in-memory state + persisted disk state so any browser gets full status."""
     is_thread_alive = _bg_migration_thread is not None and _bg_migration_thread.is_alive()
 

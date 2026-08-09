@@ -642,6 +642,89 @@
       appendLog('⏹ Stop signal dikirim ke server. Migrasi akan berhenti setelah tabel aktif selesai.', 'info');
     }
 
+    // ── Sync History (server-persisted, loaded on page load) ──
+    let batchSyncHistory = {};
+
+    async function loadSyncHistory() {
+      try {
+        const res = await fetch('/api/sync-history');
+        if (res.ok) batchSyncHistory = await res.json();
+      } catch (e) {}
+    }
+
+    function getBatchLastSyncHtml(batchIndex) {
+      const key = `batch_${batchIndex}`;
+      const records = batchSyncHistory[key] || [];
+      if (records.length === 0) {
+        return '<span style="color:#6b7280; font-style:italic; font-size:0.72rem;">Belum pernah sync</span>';
+      }
+      const last = records[records.length - 1];
+      const dt = new Date(last.timestamp).toLocaleString('id-ID', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit', second:'2-digit' });
+      if (last.status === 'success') {
+        return `<span style="color:#6ee7b7; font-size:0.72rem;">✓ Last sync: ${dt} (${last.tables_processed}/${last.tables_total} tabel)</span>`;
+      } else if (last.status === 'partial') {
+        return `<span style="color:#fbbf24; font-size:0.72rem;">⚠ Last sync: ${dt} (${last.tables_processed}/${last.tables_total} tabel, ${last.errors?.length || 0} error)</span>`;
+      } else {
+        return `<span style="color:#f87171; font-size:0.72rem;">✗ Last sync: ${dt} — GAGAL (${last.errors?.length || 0} error)</span>`;
+      }
+    }
+
+    function getBatchSyncLogHtml(batchIndex) {
+      const key = `batch_${batchIndex}`;
+      const records = (batchSyncHistory[key] || []).slice().reverse().slice(0, 10); // last 10, newest first
+      if (records.length === 0) return '<span style="color:#6b7280; font-style:italic;">Belum ada riwayat sync.</span>';
+      return records.map(r => {
+        const dt = new Date(r.timestamp).toLocaleString('id-ID', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit', second:'2-digit' });
+        const icon = r.status === 'success' ? '✓' : (r.status === 'partial' ? '⚠' : '✗');
+        const color = r.status === 'success' ? '#6ee7b7' : (r.status === 'partial' ? '#fbbf24' : '#f87171');
+        let html = `<div style="padding:4px 0; border-bottom:1px solid rgba(255,255,255,0.05);">`;
+        html += `<span style="color:${color};">${icon}</span> <span style="color:#d1d5db;">${dt}</span>`;
+        html += ` <span style="color:#9ca3af; font-size:0.7rem;">${r.tables_processed}/${r.tables_total} tabel`;
+        if (r.duration_seconds) html += ` · ${r.duration_seconds}s`;
+        html += `</span>`;
+        if (r.errors && r.errors.length > 0) {
+          html += `<div style="margin-top:3px; color:#f87171; font-size:0.68rem;">Error (${r.errors.length}):`;
+          r.errors.slice(0, 5).forEach(e => { html += `<br>&nbsp;&nbsp;• ${e.substring(0, 120)}`; });
+          if (r.errors.length > 5) html += `<br>&nbsp;&nbsp;... dan ${r.errors.length - 5} error lainnya`;
+          html += `</div>`;
+        }
+        html += `</div>`;
+        return html;
+      }).join('');
+    }
+
+    function updateBatchSyncUI(batchIdx) {
+      const label = document.getElementById(`batchLastSync_${batchIdx}`);
+      if (label) label.innerHTML = getBatchLastSyncHtml(batchIdx);
+      const logDiv = document.getElementById(`batchSyncLog_${batchIdx}`);
+      if (logDiv) logDiv.innerHTML = getBatchSyncLogHtml(batchIdx);
+    }
+
+    async function saveSyncRecord(batchIdx, status, tablesProcessed, tablesTotal, errors, durationSeconds) {
+      const record = {
+        batch_key: `batch_${batchIdx}`,
+        timestamp: new Date().toISOString(),
+        status,
+        tables_processed: tablesProcessed,
+        tables_total: tablesTotal,
+        errors,
+        duration_seconds: Math.round(durationSeconds)
+      };
+      // Update in-memory immediately for instant UI refresh
+      const key = `batch_${batchIdx}`;
+      if (!batchSyncHistory[key]) batchSyncHistory[key] = [];
+      batchSyncHistory[key].push(record);
+      updateBatchSyncUI(batchIdx);
+      // Persist to server
+      try {
+        await fetch('/api/sync-record', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(record)
+        });
+      } catch (e) {}
+    }
+
 
     function appendLog(text, type = 'info') {
       const term = document.getElementById('logTerminal');
@@ -728,11 +811,14 @@
           updateSingleTableRowStatus(data.table_name, 'FAILED', `✗ Gagal: ${data.error}`);
         }
 
-        // Update active batch progress bars live and auto-resolve batch when all tables finish
+        // Update active batch progress bars live, track errors, auto-resolve when all tables finish
         Object.keys(activeBatchTrackers).forEach(bIdx => {
           const tracker = activeBatchTrackers[bIdx];
           if (tracker && tracker.tables.includes(data.table_name)) {
             tracker.completedCount += 1;
+            if (evt === 'table_error') {
+              tracker.errors.push(`[${data.table_name}] ${data.error || 'Unknown error'}`);
+            }
             const bPct = Math.round((tracker.completedCount / tracker.totalCount) * 100);
             const bBar = document.getElementById(`batchProgressBar_${bIdx}`);
             if (bBar) bBar.style.width = `${bPct}%`;
@@ -804,34 +890,39 @@
       appendLog(`🚀 Memulai migrasi ${batch.batch_name} (${batch.table_count} tabel, total ${batch.total_rows.toLocaleString()} baris)...`, 'info');
 
       return new Promise(async (resolve, reject) => {
+        const batchStartTime = Date.now();
         activeBatchTrackers[batchIdx] = {
           tables: batch.tables,
           totalCount: batch.table_count,
           completedCount: 0,
-          resolve: (result) => {
+          errors: [],
+          resolve: async (result) => {
+            const durationSec = (Date.now() - batchStartTime) / 1000;
+            const errors = activeBatchTrackers[batchIdx]?.errors || [];
+            const processedCount = activeBatchTrackers[batchIdx]?.completedCount || batch.table_count;
+            const status = errors.length === 0 ? 'success' : (errors.length < batch.table_count ? 'partial' : 'failed');
+
             batch.status = 'COMPLETED';
             if (bar) bar.style.width = '100%';
             if (badge) {
-              badge.innerText = 'COMPLETED';
-              badge.style.color = '#10b981';
-              badge.style.borderColor = 'rgba(16, 185, 129, 0.4)';
-              badge.style.background = 'rgba(16, 185, 129, 0.15)';
+              badge.innerText = status === 'success' ? 'COMPLETED' : (status === 'partial' ? 'PARTIAL' : 'FAILED');
+              badge.style.color = status === 'success' ? '#10b981' : (status === 'partial' ? '#fbbf24' : '#ef4444');
+              badge.style.borderColor = status === 'success' ? 'rgba(16,185,129,0.4)' : (status === 'partial' ? 'rgba(251,191,36,0.4)' : 'rgba(239,68,68,0.4)');
+              badge.style.background = status === 'success' ? 'rgba(16,185,129,0.15)' : (status === 'partial' ? 'rgba(251,191,36,0.15)' : 'rgba(239,68,68,0.15)');
             }
             if (btn) btn.disabled = false;
 
-            // Save last sync time to localStorage
-            const nowStr = new Date().toLocaleString('id-ID', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit', second:'2-digit' });
-            localStorage.setItem(`pg2bq_batch_lastSync_${batchIdx}`, nowStr);
-            // Update the last sync label in UI immediately
-            const syncLabel = document.getElementById(`batchLastSync_${batchIdx}`);
-            if (syncLabel) {
-              syncLabel.innerHTML = `<span style="color:#6ee7b7;font-size:0.72rem;">✓ Last sync: ${nowStr}</span>`;
+            // Save sync record to server + update UI label immediately
+            await saveSyncRecord(batchIdx, status, processedCount, batch.table_count, errors, durationSec);
+
+            if (errors.length > 0) {
+              appendLog(`⚠ [KELOMPOK ${batchIdx}] Selesai dengan ${errors.length} error:`, 'error');
+              errors.forEach(e => appendLog(`   ✗ ${e}`, 'error'));
             }
 
             savePersistentState();
             resolve(result);
           }
-
         };
 
         try {
@@ -1309,10 +1400,10 @@
                 <span style="font-weight: 700; font-size: 1.05rem; color: var(--text-main);">${b.batch_name}</span>
                 <span class="status-badge" style="margin-left: 0.5rem; background: rgba(59,130,246,0.15); color: #60a5fa; border: 1px solid rgba(59,130,246,0.3);">${b.table_count} Tabel</span>
               </div>
-              <div style="display: flex; gap: 0.5rem; align-items: center;">
+              <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
                 <span id="batchBadge_${b.batch_index}" class="status-badge" style="${badgeStyle}">${badgeText}</span>
                 <button id="btnSyncBatch_${b.batch_index}" class="btn btn-primary" style="padding: 0.35rem 0.75rem; font-size: 0.8rem;" onclick="syncSpecificBatch(${b.batch_index})">▶ Sync Kelompok Ini</button>
-                <span id="batchLastSync_${b.batch_index}" style="font-size:0.72rem; color: var(--text-muted); white-space: nowrap;">${(function() { const t = localStorage.getItem('pg2bq_batch_lastSync_' + b.batch_index); return t ? '<span style="color:#6ee7b7;">✓ Last sync: ' + t + '</span>' : '<span style="color:#6b7280; font-style:italic;">Belum pernah sync</span>'; })()}</span>
+                <span id="batchLastSync_${b.batch_index}" style="white-space: nowrap;">${getBatchLastSyncHtml(b.batch_index)}</span>
               </div>
             </div>
 
@@ -1325,8 +1416,15 @@
               <div id="batchProgressBar_${b.batch_index}" class="progress-bar-fill" style="width: ${barWidth};"></div>
             </div>
 
-            <details style="margin-top: 0.75rem; font-size: 0.8rem; color: var(--text-muted);">
-              <summary style="cursor: pointer; color: var(--primary-color);">👁️ Lihat & Sync 1 per 1 dari ${b.table_count} Tabel dalam Kelompok Ini</summary>
+            <details style="margin-top: 0.6rem; font-size: 0.8rem;">
+              <summary style="cursor: pointer; color: #a78bfa; font-size: 0.75rem; user-select: none;">📋 Riwayat Sync Kelompok Ini</summary>
+              <div id="batchSyncLog_${b.batch_index}" style="margin-top:0.4rem; max-height:160px; overflow-y:auto; background:rgba(0,0,0,0.35); padding:0.6rem 0.75rem; border-radius:6px; font-family:monospace; font-size:0.72rem; border:1px solid rgba(167,139,250,0.2); color:var(--text-muted);">
+                ${getBatchSyncLogHtml(b.batch_index)}
+              </div>
+            </details>
+
+            <details style="margin-top: 0.5rem; font-size: 0.8rem; color: var(--text-muted);">
+              <summary style="cursor: pointer; color: var(--primary-color);">👁️ Lihat &amp; Sync 1 per 1 dari ${b.table_count} Tabel dalam Kelompok Ini</summary>
               <div style="margin-top: 0.5rem; max-height: 200px; overflow-y: auto; background: rgba(0,0,0,0.3); padding: 0.75rem; border-radius: 6px; font-family: monospace; border: 1px solid var(--border-color);">
                 ${tableListHtml}
               </div>
@@ -1544,12 +1642,15 @@
     window.onload = async () => {
       initWS();
       await renderProfilesDropdown();
+      // Load sync history from server FIRST so batch cards render with correct last-sync info
+      await loadSyncHistory();
       restorePersistentState();
       pollMigrationProgress();
       setInterval(pollMigrationProgress, 2000);
       // Check if a migration is already running on server (works when opening from new browser/laptop)
       await checkServerMigrationStatus();
     };
+
 
   </script>
 </body>

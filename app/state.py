@@ -19,6 +19,7 @@ class StateManager:
         self.profiles_file = self.data_dir / "profiles.json"
         self.stats_file = self.data_dir / "stats.json"
         self.migration_status_file = self.data_dir / "migration_status.json"
+        self.sync_history_file = self.data_dir / "sync_history.json"
 
     def save_tables(self, tables: List[Dict[str, Any]]) -> bool:
         """Saves raw table metadata to persistent disk storage."""
@@ -141,6 +142,32 @@ class StateManager:
                 self.migration_status_file.unlink()
         except Exception:
             pass
+
+    def save_sync_record(self, batch_key: str, record: Dict[str, Any]) -> bool:
+        """Appends a sync record to the history file for a specific batch. Keeps last 50 per batch."""
+        try:
+            history = self.load_sync_history()
+            if batch_key not in history:
+                history[batch_key] = []
+            history[batch_key].append(record)
+            history[batch_key] = history[batch_key][-50:]  # Keep last 50 records
+            with open(self.sync_history_file, "w", encoding="utf-8") as f:
+                json.dump(history, f, indent=2, default=str)
+            return True
+        except Exception as e:
+            logger.error(f"Error saving sync record: {e}")
+            return False
+
+    def load_sync_history(self) -> Dict[str, Any]:
+        """Loads full sync history from disk."""
+        if not self.sync_history_file.exists():
+            return {}
+        try:
+            with open(self.sync_history_file, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            logger.error(f"Error loading sync history: {e}")
+            return {}
 
 
 # Singleton instance
