@@ -1,6 +1,7 @@
 import re
 import json
 import datetime
+import decimal
 from typing import Dict, Any, Tuple
 import pyarrow as pa
 from google.cloud import bigquery
@@ -195,16 +196,22 @@ def convert_value_for_pyarrow(val: Any, bq_type: str, mode: str) -> Any:
             return str(val)
 
         if bq_type == "NUMERIC" or bq_type == "FLOAT64":
-            if isinstance(val, (int, float)):
+            if isinstance(val, (int, float, decimal.Decimal)):
                 val_str_lower = str(val).lower()
                 if "nan" in val_str_lower or "inf" in val_str_lower:
                     return None
-                return val
+                if bq_type == "NUMERIC" and not isinstance(val, decimal.Decimal):
+                    try:
+                        return decimal.Decimal(str(val))
+                    except decimal.InvalidOperation:
+                        return None
+                return float(val) if bq_type == "FLOAT64" and isinstance(val, decimal.Decimal) else val
+
             val_str = str(val).replace("$", "").replace(",", "").strip().lower()
             if not val_str or "nan" in val_str or "inf" in val_str:
                 return None
             try:
-                return float(val_str) if bq_type == "FLOAT64" else val_str
+                return float(val_str) if bq_type == "FLOAT64" else decimal.Decimal(val_str)
             except Exception:
                 return None
 
