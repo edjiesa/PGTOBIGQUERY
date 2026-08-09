@@ -356,6 +356,9 @@ async def start_migration(req: MigrationRequestModel):
                 "message": "Migration is already running in background. Monitor progress from any browser."
             }
 
+    # Reset stop flag from any previous session
+    active_migration_status["stop_requested"] = False
+
     def run_bg_migration():
         def ws_callback(event):
             safe_ws_broadcast(event)
@@ -369,8 +372,21 @@ async def start_migration(req: MigrationRequestModel):
                     )
 
         try:
+            logger.info(f"[BG MIGRATION] Starting migration of {len(req.tables or [])} specified tables (dry_run={req.dry_run})")
             state_manager.clear_migration_status()
             migrator = DatabaseMigrator(config)
+
+            # Quick connection test before starting
+            try:
+                ext = PostgresExtractor(config)
+                ext.connect()
+                logger.info(f"[BG MIGRATION] PostgreSQL connection OK: {config.pg_host}:{config.pg_port}/{config.pg_database} schema={config.pg_schema}")
+                ext.close()
+            except Exception as conn_err:
+                logger.error(f"[BG MIGRATION] PostgreSQL connection FAILED before migration: {conn_err}")
+                safe_ws_broadcast({"event": "table_error", "data": {"table_name": "CONNECTION", "error": f"Koneksi PostgreSQL gagal: {conn_err}"}})
+                return
+
             migrator.run_migration(
                 tables=req.tables,
                 exclude_tables=req.exclude_tables,
@@ -418,10 +434,62 @@ def stop_migration():
     active_migration_status["stop_requested"] = True
     return {"status": "stop_requested", "message": "Stop signal sent. Migration will finish the current table then stop."}
 
+@web_app.get("/api/diagnose-table/{table_name}")
+def diagnose_table(table_name: str):
+    """Diagnoses a single table: tests PG connection, schema read, row count, and first-row extraction.
+    Use this to debug 'tidak menarik data' issues without running full migration."""
+    result = {
+        "table_name": table_name,
+        "pg_host": config.pg_host,
+        "pg_database": config.pg_database,
+        "pg_schema": config.pg_schema,
+        "steps": []
+    }
+    ext = PostgresExtractor(config)
+    try:
+        # Step 1: Connection
+        try:
+            ext.connect()
+            result["steps"].append({"step": "connect", "status": "ok", "detail": f"{config.pg_host}:{config.pg_port}/{config.pg_database}"})
+        except Exception as e:
+            result["steps"].append({"step": "connect", "status": "FAIL", "detail": str(e)})
+            return result
 
+        # Step 2: Find schema
+        try:
+            schema = ext.find_schema_for_table(table_name)
+            result["steps"].append({"step": "find_schema", "status": "ok", "detail": f"schema = '{schema}'"})
+        except Exception as e:
+            schema = config.pg_schema
+            result["steps"].append({"step": "find_schema", "status": "warn", "detail": str(e)})
 
+        # Step 3: Column schema
+        try:
+            cols = ext.get_table_schema(table_name)
+            result["steps"].append({"step": "get_schema", "status": "ok", "detail": f"{len(cols)} kolom: {[c['column_name'] for c in cols[:10]]}"})
+        except Exception as e:
+            result["steps"].append({"step": "get_schema", "status": "FAIL", "detail": str(e)})
+            return result
 
+        # Step 4: Row count
+        try:
+            rc = ext.get_row_count(table_name)
+            result["steps"].append({"step": "row_count", "status": "ok", "detail": f"{rc} baris"})
+        except Exception as e:
+            result["steps"].append({"step": "row_count", "status": "FAIL", "detail": str(e)})
 
+        # Step 5: Stream first batch
+        try:
+            first_batch = next(iter(ext.stream_table_data(table_name, batch_size=3)))
+            result["steps"].append({"step": "stream_data", "status": "ok", "detail": f"Sample ({len(first_batch)} baris): {list(dict(first_batch[0]).keys())[:8]}"})
+        except StopIteration:
+            result["steps"].append({"step": "stream_data", "status": "ok", "detail": "Tabel kosong (0 baris)"})
+        except Exception as e:
+            result["steps"].append({"step": "stream_data", "status": "FAIL", "detail": str(e)})
+
+    finally:
+        ext.close()
+    return result
 
 
 @web_app.post("/api/migrate-single")
