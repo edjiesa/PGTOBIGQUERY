@@ -202,7 +202,13 @@ def convert_value_for_pyarrow(val: Any, bq_type: str, mode: str) -> Any:
                     return None
                 if bq_type == "NUMERIC" and not isinstance(val, decimal.Decimal):
                     try:
-                        return decimal.Decimal(str(val))
+                        d = decimal.Decimal(str(val))
+                        return d.quantize(decimal.Decimal('0.000000001'), rounding=decimal.ROUND_HALF_UP)
+                    except decimal.InvalidOperation:
+                        return None
+                if bq_type == "NUMERIC" and isinstance(val, decimal.Decimal):
+                    try:
+                        return val.quantize(decimal.Decimal('0.000000001'), rounding=decimal.ROUND_HALF_UP)
                     except decimal.InvalidOperation:
                         return None
                 return float(val) if bq_type == "FLOAT64" and isinstance(val, decimal.Decimal) else val
@@ -211,7 +217,13 @@ def convert_value_for_pyarrow(val: Any, bq_type: str, mode: str) -> Any:
             if not val_str or "nan" in val_str or "inf" in val_str:
                 return None
             try:
-                return float(val_str) if bq_type == "FLOAT64" else decimal.Decimal(val_str)
+                if bq_type == "FLOAT64":
+                    return float(val_str)
+                else:
+                    d = decimal.Decimal(val_str)
+                    # Quantize to 9 decimal places to match PyArrow pa.decimal128(38, 9) schema
+                    # and prevent 'Rescaling Decimal value would cause data loss' Arrow exception
+                    return d.quantize(decimal.Decimal('0.000000001'), rounding=decimal.ROUND_HALF_UP)
             except Exception:
                 return None
 
