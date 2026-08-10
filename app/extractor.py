@@ -1,9 +1,20 @@
 import socket
 import logging
 import psycopg2
+import psycopg2.extensions
 import concurrent.futures
 from psycopg2.extras import RealDictCursor
 from typing import Dict, List, Any, Generator, Tuple
+
+# Globally disable psycopg2's automatic datetime parsing
+# This prevents "ValueError: year -2 is out of range" when encountering BC dates
+# type_mapper.py will safely parse and sanitize these string representations instead.
+def cast_to_string(value, curs):
+    return value
+
+psycopg2.extensions.register_type(psycopg2.extensions.new_type((1082,), "DATE2STR", cast_to_string))
+psycopg2.extensions.register_type(psycopg2.extensions.new_type((1114,), "TIMESTAMP2STR", cast_to_string))
+psycopg2.extensions.register_type(psycopg2.extensions.new_type((1184,), "TIMESTAMPTZ2STR", cast_to_string))
 from app.config import MigrationConfig
 
 logger = logging.getLogger("pgtobigquery.extractor")
