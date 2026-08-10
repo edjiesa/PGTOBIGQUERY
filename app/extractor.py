@@ -174,7 +174,7 @@ class PostgresExtractor:
             FROM pg_class c
             JOIN pg_namespace n ON n.oid = c.relnamespace
             WHERE n.nspname = '{safe_schema}'
-              AND c.relkind = 'r'
+              AND c.relkind IN ('r', 'f', 'p', 'v', 'm')
             ORDER BY c.relname;
         """
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -205,8 +205,16 @@ class PostgresExtractor:
         target_schema = schema or self.config.pg_schema
         with self.conn.cursor() as cur:
             try:
-                # Fast pg_tables query compatible with EnterpriseDB and Postgres
-                cur.execute("SELECT tablename FROM pg_tables WHERE schemaname = %s ORDER BY tablename;", (target_schema,))
+                # Query pg_class directly to include Foreign Tables, Views, etc.
+                query = """
+                    SELECT c.relname
+                    FROM pg_class c
+                    JOIN pg_namespace n ON n.oid = c.relnamespace
+                    WHERE n.nspname = %s
+                      AND c.relkind IN ('r', 'f', 'p', 'v', 'm')
+                    ORDER BY c.relname;
+                """
+                cur.execute(query, (target_schema,))
                 tables = [row[0] for row in cur.fetchall()]
             except Exception:
                 self.conn.rollback()
@@ -214,7 +222,7 @@ class PostgresExtractor:
                     SELECT table_name
                     FROM information_schema.tables
                     WHERE table_schema = %s
-                      AND table_type = 'BASE TABLE'
+                      AND table_type IN ('BASE TABLE', 'FOREIGN TABLE', 'VIEW', 'LOCAL TEMPORARY')
                     ORDER BY table_name;
                 """
                 cur.execute(query, (target_schema,))
