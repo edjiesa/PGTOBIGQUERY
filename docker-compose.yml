@@ -29,7 +29,7 @@ services:
       WEB_HOST: "0.0.0.0"
       WEB_PORT: 8000
     volumes:
-      - ./.env:/app/.env:ro
+      - ./.env:/app/.env
       # Optional: Volume mount your GCP Service Account JSON key if not passing via Web UI
       - ./gcp-service-account.json:/app/gcp-credentials.json:ro
       - pg_data_store:/app/data
