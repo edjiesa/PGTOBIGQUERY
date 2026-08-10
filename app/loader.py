@@ -300,7 +300,11 @@ class BigQueryLoader:
             fallback_parquet = parquet_file_path + ".str_fallback.parquet"
             try:
                 self.write_all_string_parquet(parquet_file_path, fallback_parquet)
-                self.client.delete_table(table_ref, not_found_ok=True)
+                
+                # Only delete the table if this is a WRITE_TRUNCATE (e.g., first batch)
+                if write_disposition == "WRITE_TRUNCATE":
+                    self.client.delete_table(table_ref, not_found_ok=True)
+                    
                 string_schema = [
                     bigquery.SchemaField(f.name, "STRING", mode="NULLABLE", description=f.description)
                     for f in bq_schema
@@ -308,7 +312,7 @@ class BigQueryLoader:
                 fallback_job_config = bigquery.LoadJobConfig(
                     schema=string_schema,
                     source_format=bigquery.SourceFormat.PARQUET,
-                    write_disposition="WRITE_TRUNCATE",
+                    write_disposition=write_disposition,
                     autodetect=False
                 )
                 with open(fallback_parquet, "rb") as source_file:
