@@ -93,7 +93,8 @@ def postgres_to_pyarrow_field(col_name: str, pg_type: str, is_nullable: bool = T
     Constructs a PyArrow Field from a PostgreSQL column definition.
     """
     bq_type, mode = postgres_to_bigquery_type(pg_type)
-    nullable = is_nullable if mode != "REPEATED" else True
+    # Always allow NULLs in PyArrow to prevent crashes when dirty data is sanitized to None
+    nullable = True
 
     if mode == "REPEATED":
         # Base element type inside list
