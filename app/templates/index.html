@@ -336,18 +336,35 @@
     .log-entry.error { color: var(--error); }
     .log-entry.success { color: var(--success); }
     .log-entry.info { color: var(--primary-blue); }
+
+    .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 1000; align-items: center; justify-content: center; }
+    .modal-content { background: #0a0e1a; border: 1px solid var(--card-border); padding: 2rem; border-radius: 12px; width: 80%; max-width: 800px; max-height: 80vh; overflow-y: auto; }
   </style>
 </head>
 <body>
+  <div class="modal-overlay" id="errorModal">
+    <div class="modal-content">
+      <div style="display:flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+        <h3 style="color: var(--error);">⚠️ Error Logs</h3>
+        <button class="btn btn-secondary" onclick="document.getElementById('errorModal').style.display='none'">Close</button>
+      </div>
+      <div id="errorLogContainer" class="log-terminal" style="height: 400px; color: var(--error);"></div>
+    </div>
+  </div>
+
   <div class="container">
     <header>
       <div class="logo-area">
         <h1>🌐 Multi-Remote PostgreSQL ➔ BigQuery</h1>
         <p>Airbyte-Style Integration & Standalone Remote Database Migration Engine</p>
       </div>
-      <div class="status-badge">
-        <div class="dot"></div>
-        System Online
+      <div style="display: flex; gap: 1rem; align-items: center;">
+        <button onclick="openErrorModal()" class="btn btn-secondary" style="border-color: rgba(239, 68, 68, 0.5); color: #fca5a5;">
+          ⚠️ Log Tabel Gagal
+        </button>
+        <div class="status-badge">
+          <div class="dot"></div> System Online
+        </div>
       </div>
     </header>
 
@@ -1744,10 +1761,66 @@
     };
 
 
+    // Error Logs Modal JS
+    async function openErrorModal() {
+      document.getElementById('errorModal').style.display = 'flex';
+      const container = document.getElementById('errorLogContainer');
+      container.innerHTML = '<div style="color:var(--text-muted);">Memuat riwayat error...</div>';
+      
+      try {
+        const res = await fetch('/api/migration-errors');
+        const errors = await res.json();
+        
+        if (!errors || errors.length === 0) {
+          container.innerHTML = '<div style="color:var(--success);">✅ Tidak ada tabel yang gagal. Semua bersih!</div>';
+          return;
+        }
+
+        let html = `
+          <div style="margin-bottom: 1rem;">
+            <button class="btn btn-secondary" style="border-color: rgba(239, 68, 68, 0.5); color: #fca5a5; font-size: 0.75rem; padding: 0.4rem 0.8rem;" onclick="clearErrorLogs()">
+              🗑️ Clear Semua Riwayat
+            </button>
+          </div>
+          <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem; text-align: left;">
+            <thead>
+              <tr style="border-bottom: 1px solid var(--card-border);">
+                <th style="padding: 0.5rem; color: var(--text-muted);">Waktu</th>
+                <th style="padding: 0.5rem; color: var(--text-muted);">Nama Tabel</th>
+                <th style="padding: 0.5rem; color: var(--text-muted);">Detail Error</th>
+              </tr>
+            </thead>
+            <tbody>
+        `;
+        
+        errors.forEach(err => {
+          html += `
+            <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+              <td style="padding: 0.5rem; white-space: nowrap;">${err.timestamp}</td>
+              <td style="padding: 0.5rem; font-weight: bold;">${err.table_name}</td>
+              <td style="padding: 0.5rem; font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: var(--error); word-break: break-all;">${err.error}</td>
+            </tr>
+          `;
+        });
+        
+        html += `</tbody></table>`;
+        container.innerHTML = html;
+
+      } catch(e) {
+        container.innerHTML = '<div style="color:var(--error);">Gagal memuat log error.</div>';
+      }
+    }
+
+    async function clearErrorLogs() {
+      if(!confirm("Yakin ingin menghapus seluruh log error?")) return;
+      try {
+        await fetch('/api/migration-errors', { method: 'DELETE' });
+        openErrorModal();
+      } catch(e) {
+        alert("Gagal menghapus log.");
+      }
+    }
+
   </script>
 </body>
-
 </html>
-
-
-

@@ -17,6 +17,7 @@ from app.extractor import PostgresExtractor
 from app.loader import BigQueryLoader
 from app.migrator import DatabaseMigrator, active_migration_status
 from app.state import state_manager
+from app.error_logger import get_migration_errors, clear_migration_errors
 
 
 logger = logging.getLogger("pgtobigquery.web")
@@ -133,7 +134,16 @@ async def get_dashboard(request: Request):
         context={"config": safe_config}
     )
 
+@web_app.get("/api/migration-errors")
+async def api_get_migration_errors():
+    """Returns the persistent list of migration errors."""
+    return get_migration_errors()
 
+@web_app.delete("/api/migration-errors")
+async def api_clear_migration_errors():
+    """Clears the persistent list of migration errors."""
+    success = clear_migration_errors()
+    return {"status": "success" if success else "error"}
 
 @web_app.get("/api/config")
 async def get_config():

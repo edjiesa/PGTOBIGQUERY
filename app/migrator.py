@@ -10,6 +10,7 @@ from app.extractor import PostgresExtractor
 from app.loader import BigQueryLoader
 from app.type_mapper import postgres_to_bigquery_type, sanitize_bq_table_id
 from app.state import state_manager
+from app.error_logger import log_migration_error
 
 logger = logging.getLogger("pgtobigquery.migrator")
 
@@ -165,6 +166,7 @@ class DatabaseMigrator:
 
         except Exception as table_err:
             logger.error(f"Error migrating table '{table_name}': {table_err}", exc_info=True)
+            log_migration_error(table_name, str(table_err))
             err_info = {
                 "table_name": table_name,
                 "status": "failed",
