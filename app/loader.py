@@ -289,12 +289,14 @@ class BigQueryLoader:
             schema=bq_schema,
             source_format=bigquery.SourceFormat.PARQUET,
             write_disposition=write_disposition,
-            autodetect=False,
-            schema_update_options=[
+            autodetect=False
+        )
+        
+        if write_disposition == "WRITE_APPEND":
+            job_config.schema_update_options = [
                 bigquery.SchemaUpdateOption.ALLOW_FIELD_ADDITION,
                 bigquery.SchemaUpdateOption.ALLOW_FIELD_RELAXATION
             ]
-        )
 
         logger.info(f"Starting BigQuery Load Job for table '{clean_table_id}' ({len(bq_schema)} columns)...")
         try:
