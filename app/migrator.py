@@ -111,7 +111,16 @@ class DatabaseMigrator:
             rows_loaded = 0
             batch_num = 0
 
-            stream = worker_extractor.stream_table_data(table_name, batch_size=self.config.batch_size)
+            # Dynamic batch size to avoid BigQuery's 1500 load jobs/table/day limit
+            dynamic_batch_size = self.config.batch_size
+            if row_count > 0:
+                # Ensure we don't generate more than 800 chunks
+                minimum_safe_batch = (row_count // 800) + 1
+                dynamic_batch_size = max(self.config.batch_size, minimum_safe_batch)
+                if dynamic_batch_size > self.config.batch_size:
+                    logger.info(f"Increased batch size to {dynamic_batch_size} for {table_name} to avoid BQ quota limits.")
+
+            stream = worker_extractor.stream_table_data(table_name, batch_size=dynamic_batch_size)
 
             for batch in stream:
                 batch_num += 1
