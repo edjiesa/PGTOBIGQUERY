@@ -268,10 +268,20 @@ class BigQueryLoader:
         # Check existing table schema in BigQuery
         try:
             existing_table = self.client.get_table(table_ref)
-            # If existing BigQuery table has fewer columns than PostgreSQL bq_schema or write_disposition is WRITE_TRUNCATE, recreate table schema
-            if len(existing_table.schema) < len(bq_schema) and write_disposition == "WRITE_TRUNCATE":
-                logger.info(f"Recreating BigQuery table '{clean_table_id}' to expand schema from {len(existing_table.schema)} to {len(bq_schema)} columns...")
-                self.client.delete_table(table_ref, not_found_ok=True)
+            if write_disposition == "WRITE_TRUNCATE":
+                schema_mismatch = False
+                if len(existing_table.schema) != len(bq_schema):
+                    schema_mismatch = True
+                else:
+                    existing_types = {f.name: f.field_type for f in existing_table.schema}
+                    for new_field in bq_schema:
+                        if new_field.name not in existing_types or existing_types[new_field.name] != new_field.field_type:
+                            schema_mismatch = True
+                            break
+                            
+                if schema_mismatch:
+                    logger.info(f"Schema mismatch detected for '{clean_table_id}'. Recreating BigQuery table...")
+                    self.client.delete_table(table_ref, not_found_ok=True)
         except Exception:
             pass
 
