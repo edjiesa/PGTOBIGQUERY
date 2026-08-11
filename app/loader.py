@@ -306,6 +306,10 @@ class BigQueryLoader:
             logger.info(f"BigQuery Load Job completed for table '{clean_table_id}'. Output rows: {job.output_rows}")
             return job.output_rows or 0
         except Exception as load_err:
+            if write_disposition != "WRITE_TRUNCATE":
+                logger.error(f"Primary load failed for APPEND chunk '{clean_table_id}': {load_err}")
+                raise load_err
+
             logger.warning(f"Primary load failed for '{clean_table_id}': {load_err}. Retrying with all-string Parquet fallback...")
 
             # Fallback: re-write Parquet as all strings, then load with all-STRING BigQuery schema
