@@ -518,7 +518,7 @@
               <div style="font-size: 0.8rem; color: var(--text-muted);">Diurutkan dari jumlah baris <strong>terkecil ke terbesar</strong> (eksekusi per kelompok atau per 1 tabel)</div>
             </div>
             <div style="display: flex; gap: 0.5rem;">
-              <button class="btn btn-secondary" onclick="loadTableBatches()">📊 Muat / Refresh Kelompok Tabel</button>
+              <button class="btn btn-secondary" onclick="loadTableBatches(true)">📊 Muat / Refresh Kelompok Tabel</button>
             </div>
           </div>
 
@@ -1377,15 +1377,20 @@
 
     let loadedBatchesData = [];
 
-    async function loadTableBatches() {
+    async function loadTableBatches(forceRefresh = false) {
       await saveConfig();
       appendLog('⏳ Mengelompokkan tabel (100 tabel per kelompok, urut baris terkecil -> terbesar)...', 'info');
 
+      if (forceRefresh) {
+        rawLoadedTables = [];
+      }
+      
       let tables = rawLoadedTables;
 
       // If tables not loaded yet, fetch via background API
       if (!tables || tables.length === 0) {
-        const startRes = await safeFetchJson('/api/tables');
+        const url = forceRefresh ? '/api/tables?force_refresh=true' : '/api/tables';
+        const startRes = await safeFetchJson(url);
         let data;
         if (startRes.ok && startRes.data.status === 'started') {
           try {
@@ -1402,7 +1407,8 @@
           tables = data.tables;
         } else {
           // Fallback to table-batches API if needed
-          const batchRes = await safeFetchJson('/api/table-batches?batch_size=100');
+          const batchUrl = forceRefresh ? '/api/table-batches?batch_size=100&force_refresh=true' : '/api/table-batches?batch_size=100';
+          const batchRes = await safeFetchJson(batchUrl);
           if (batchRes.ok && batchRes.data.status === 'started') {
             try {
               const bData = await pollJobUntilDone(batchRes.data.job_id);

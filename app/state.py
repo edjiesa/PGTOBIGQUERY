@@ -69,6 +69,14 @@ class StateManager:
             logger.error(f"Error loading batches from persistent storage: {e}")
         return None
 
+    def clear_tables_and_batches(self):
+        """Clears cached tables and batches to force a fresh pull from PostgreSQL."""
+        if self.tables_file.exists():
+            self.tables_file.unlink()
+        if self.batches_file.exists():
+            self.batches_file.unlink()
+        logger.info("Cleared cached tables and batches.")
+
     def update_table_status_in_batches(self, table_name: str, status: str = "COMPLETED", rows_migrated: int = 0):
         """Updates completion status for a specific table across batch records."""
         batches = self.load_batches()

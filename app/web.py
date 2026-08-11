@@ -267,11 +267,12 @@ def test_connections():
 
 
 @web_app.get("/api/tables")
-def list_tables(background_tasks: BackgroundTasks):
+def list_tables(background_tasks: BackgroundTasks, force_refresh: bool = False):
     """Fetches PostgreSQL tables and metadata in background (Optimized for 1000+ slow tables)."""
-    cached_tables = state_manager.load_tables()
-    if cached_tables:
-        return {"status": "success", "tables": cached_tables}
+    if not force_refresh:
+        cached_tables = state_manager.load_tables()
+        if cached_tables:
+            return {"status": "success", "tables": cached_tables}
 
     job_id = "load_tables"
     if job_id in async_jobs and async_jobs[job_id].get("status") == "completed":
@@ -298,22 +299,26 @@ def list_tables(background_tasks: BackgroundTasks):
 
 
 @web_app.get("/api/table-batches")
-def get_table_batches(background_tasks: BackgroundTasks, batch_size: int = 100):
+def get_table_batches(background_tasks: BackgroundTasks, batch_size: int = 100, force_refresh: bool = False):
     """
     Groups all PostgreSQL tables into batches of N tables (default 100 per batch),
     sorted ascending by row count (from smallest tables with 0 rows to largest).
     Runs in background to prevent reverse proxy 504 timeouts.
     """
-    cached_batches = state_manager.load_batches()
-    if cached_batches:
-        cached_tables = state_manager.load_tables() or []
-        return {
-            "status": "success",
-            "total_tables": len(cached_tables),
-            "total_batches": len(cached_batches),
-            "batch_table_size": batch_size,
-            "batches": cached_batches
-        }
+    if force_refresh:
+        state_manager.clear_tables_and_batches()
+        
+    if not force_refresh:
+        cached_batches = state_manager.load_batches()
+        if cached_batches:
+            cached_tables = state_manager.load_tables() or []
+            return {
+                "status": "success",
+                "total_tables": len(cached_tables),
+                "total_batches": len(cached_batches),
+                "batch_table_size": batch_size,
+                "batches": cached_batches
+            }
 
     job_id = "table_batches"
     if job_id in async_jobs and async_jobs[job_id].get("status") == "completed":
