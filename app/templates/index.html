@@ -1554,11 +1554,11 @@
 
     async function syncSingleTable(tableName) {
       await saveConfig();
-      appendLog(`🚀 Memulai migrasi 1 tabel spesifik: '${tableName}'...`, 'info');
-      updateSingleTableRowStatus(tableName, 'RUNNING', '⏳ Proses migrasi ke BigQuery...');
+      appendLog(`🚀 Memulai migrasi latar belakang 1 tabel spesifik: '${tableName}'...`, 'info');
+      updateSingleTableRowStatus(tableName, 'RUNNING', '⏳ Tugas dikirim ke daemon latar belakang...');
 
       try {
-        const res = await safeFetchJson('/api/migrate-single', {
+        const res = await safeFetchJson('/api/migrate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ tables: [tableName], dry_run: false })
@@ -1579,10 +1579,8 @@
           return;
         }
 
-        const rows = data.bigquery_rows || 0;
-        appendLog(`🎉 [SELESAI DIBENTUK & TERISI] Tabel BigQuery '${tableName}' -> ${rows.toLocaleString()} baris data SUKSES TERVERIFIKASI TERMUAT!`, 'success');
-        updateSingleTableRowStatus(tableName, 'SUCCESS', `✓ ${rows.toLocaleString()} baris in BigQuery`);
-        savePersistentState();
+        startBgPolling();
+        appendLog(`🎉 Tugas untuk tabel '${tableName}' berhasil masuk ke mesin latar belakang! Proses akan tetap berjalan walau browser ditutup. Pantau progress di bar biru atas.`, 'success');
 
       } catch (err) {
         appendLog(`✗ Failed sync tabel '${tableName}': ${err}`, 'error');
