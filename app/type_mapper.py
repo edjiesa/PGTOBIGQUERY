@@ -77,7 +77,7 @@ def postgres_to_bigquery_type(pg_type: str) -> Tuple[str, str]:
     elif clean_type in ("time", "time without time zone", "time with time zone", "timetz"):
         bq_type = "TIME"
     elif clean_type in ("json", "jsonb"):
-        bq_type = "JSON"
+        bq_type = "STRING"
     elif clean_type in ("bytea",):
         bq_type = "BYTES"
     else:
@@ -148,10 +148,8 @@ def convert_value_for_pyarrow(val: Any, bq_type: str, mode: str) -> Any:
                 return [str(item) if not isinstance(item, (int, float, bool)) else item for item in val]
             return [str(val)]
 
-        if bq_type == "JSON":
-            if isinstance(val, (dict, list)):
-                return json.dumps(val, default=str)
-            return str(val)
+        if isinstance(val, (dict, list)):
+            return json.dumps(val, default=str)
 
         if bq_type in ("DATETIME", "TIMESTAMP"):
             if isinstance(val, datetime.datetime):
