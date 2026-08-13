@@ -28,6 +28,7 @@ services:
       DATA_DIR: /app/data
       WEB_HOST: "0.0.0.0"
       WEB_PORT: 8000
+      TZ: ${TZ:-Asia/Jakarta}
     volumes:
       - ./.env:/app/.env
       # Optional: Volume mount your GCP Service Account JSON key if not passing via Web UI
