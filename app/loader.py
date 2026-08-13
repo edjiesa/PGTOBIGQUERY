@@ -306,42 +306,8 @@ class BigQueryLoader:
             logger.info(f"BigQuery Load Job completed for table '{clean_table_id}'. Output rows: {job.output_rows}")
             return job.output_rows or 0
         except Exception as load_err:
-            if write_disposition != "WRITE_TRUNCATE":
-                logger.error(f"Primary load failed for APPEND chunk '{clean_table_id}': {load_err}")
-                raise load_err
-
-            logger.warning(f"Primary load failed for '{clean_table_id}': {load_err}. Retrying with all-string Parquet fallback...")
-
-            # Fallback: re-write Parquet as all strings, then load with all-STRING BigQuery schema
-            fallback_parquet = parquet_file_path + ".str_fallback.parquet"
-            try:
-                self.write_all_string_parquet(parquet_file_path, fallback_parquet)
-                
-                # Only delete the table if this is a WRITE_TRUNCATE (e.g., first batch)
-                if write_disposition == "WRITE_TRUNCATE":
-                    self.client.delete_table(table_ref, not_found_ok=True)
-                    
-                string_schema = [
-                    bigquery.SchemaField(f.name, "STRING", mode="NULLABLE", description=f.description)
-                    for f in bq_schema
-                ]
-                fallback_job_config = bigquery.LoadJobConfig(
-                    schema=string_schema,
-                    source_format=bigquery.SourceFormat.PARQUET,
-                    write_disposition=write_disposition,
-                    autodetect=False
-                )
-                with open(fallback_parquet, "rb") as source_file:
-                    fallback_job = self.client.load_table_from_file(source_file, table_ref, job_config=fallback_job_config)
-                fallback_job.result()
-                logger.info(f"Fallback Load Job completed for '{clean_table_id}'. Output rows: {fallback_job.output_rows}")
-                return fallback_job.output_rows or 0
-            except Exception as final_err:
-                logger.error(f"Both primary and fallback load jobs failed for '{clean_table_id}': {final_err}")
-                raise final_err
-            finally:
-                if os.path.exists(fallback_parquet):
-                    os.remove(fallback_parquet)
+            logger.error(f"Primary load failed for chunk '{clean_table_id}' (disposition={write_disposition}): {load_err}")
+            raise load_err
 
 
 
