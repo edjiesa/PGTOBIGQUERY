@@ -123,7 +123,7 @@ def postgres_to_pyarrow_field(col_name: str, pg_type: str, is_nullable: bool = T
         elif bq_type == "TIMESTAMP":
             pa_type = pa.timestamp('us', tz='UTC')
         elif bq_type == "TIME":
-            pa_type = pa.string()
+            pa_type = pa.time64('us')
         elif bq_type == "BYTES":
             pa_type = pa.binary()
         elif bq_type == "JSON":
@@ -194,7 +194,19 @@ def convert_value_for_pyarrow(val: Any, bq_type: str, mode: str) -> Any:
                 return None
 
         if bq_type == "TIME":
-            return str(val)
+            if isinstance(val, datetime.time):
+                return val
+            if isinstance(val, datetime.datetime):
+                return val.time()
+            val_str = str(val).strip().lower()
+            if not val_str or "infinity" in val_str or "bc" in val_str:
+                return None
+            try:
+                # Python 3.7+ supports fromisoformat for time as well, but let's be safe
+                # Time string looks like '14:36:34' or '14:36:34.123456'
+                return datetime.time.fromisoformat(val_str)
+            except Exception:
+                return None
 
         if bq_type == "NUMERIC" or bq_type == "FLOAT64":
             if isinstance(val, (int, float, decimal.Decimal)):
